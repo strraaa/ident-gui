@@ -198,21 +198,22 @@ class ServicesAggregator:
 class StageMapper:
     """Определение стадии воронки продаж"""
 
-    # Маппинг статусов → стадии
+    # Маппинг статусов → стадии (актуальные стадии из Bitrix24)
     STAGE_MAPPING = {
-        'Запланирован': 'CONSULTATION_SCHEDULED',
-        'Пациент пришел': 'CONSULTATION_SCHEDULED',
-        'В процессе': 'CONSULTATION_DONE',
-        'Завершен': 'TREATMENT',
-        'Завершен (счет выдан)': 'WON',
-        'Отменен': 'LOSE'
+        'Запланирован': 'NEW',              # Запись на консультацию
+        'Пациент пришел': 'NEW',            # Запись на консультацию
+        'В процессе': 'PREPARATION',        # Консультация проведена
+        'Завершен': 'UC_NO40X0',            # Лечение
+        'Завершен (счет выдан)': 'WON',     # Сделка успешна
+        'Отменен': 'LOSE'                   # Сделка провалена
     }
 
-    # Стадии, защищенные от автоизменения
+    # Стадии, защищенные от автоизменения (ручные стадии менеджера)
     PROTECTED_STAGES = [
-        'PLAN_PRESENTATION',      # Презентация плана лечения
-        'PREPAYMENT_RECEIVED',    # Получена предоплата
-        'WAITING_LIST'            # Лист ожидания
+        'PREPAYMENT_INVOICE',  # Презентация плана лечения
+        'FINAL_INVOICE',       # Получена предоплата
+        'EXECUTING',           # Лист ожидания
+        'APOLOGY'              # Анализ причины провала
     ]
 
     @staticmethod
@@ -390,18 +391,20 @@ class DataTransformer:
                 'opportunity': reception.get('TotalAmount', 0),  # Сумма
                 'currency_id': 'RUB',
 
-                # Кастомные поля (UF_CRM_*)
-                'uf_crm_ident_id': unique_id,
+                # Кастомные поля (актуальные ID из Bitrix24)
+                'UF_CRM_1769008900': start_time_iso,        # Дата начало приема
+                'UF_CRM_1769008947': end_time_iso,          # Дата окончания приема
+                'UF_CRM_1769008996': reception['DoctorFullName'],  # Врач
+                'UF_CRM_1769009098': services,              # Услуги
+
+                # Дополнительная информация (в комментарии)
+                'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)
                 'uf_crm_filial': reception.get('Filial', 'Не указан'),
-                'uf_crm_reception_start': start_time_iso,
-                'uf_crm_reception_end': end_time_iso,
-                'uf_crm_doctor_name': reception['DoctorFullName'],
-                'uf_crm_doctor_speciality': reception.get('Speciality', ''),
-                'uf_crm_services': services,
                 'uf_crm_armchair': reception.get('Armchair', ''),
                 'uf_crm_status': reception.get('Status', 'Запланирован'),
                 'uf_crm_card_number': reception.get('CardNumber', ''),
                 'uf_crm_order_date': order_date_iso,
+                'uf_crm_doctor_speciality': reception.get('Speciality', ''),
 
                 # Комментарий
                 'comments': self._format_comment(reception)
