@@ -442,7 +442,7 @@ class IdentConnector:
             -- ✅ ОПТИМИЗАЦИЯ: OUTER APPLY вместо подзапросов
             OUTER APPLY (
                 SELECT
-                    STRING_AGG(si.Name, ', ') WITHIN GROUP (ORDER BY si.Name) AS ServicesText,
+                    STRING_AGG(si.Name, ', ') AS ServicesText,
                     SUM(osr.CountService * sip.Price - ISNULL(osr.DiscountSum, 0)) AS TotalAmount
                 FROM OrderServiceRelation osr
                 INNER JOIN ServiceItemPrices sip ON osr.ID_ServicePrices = sip.ID
