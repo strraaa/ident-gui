@@ -410,17 +410,6 @@ class DataTransformer:
 
                 # Комментарий
                 'comments': self._format_comment(reception)
-            },
-
-            # Исходные данные (для отладки)
-            'raw_data': {
-                'reception_id': reception['ReceptionID'],
-                'status': reception.get('Status'),
-                'patient_appeared': reception.get('PatientAppeared'),
-                'reception_started': reception.get('ReceptionStarted'),
-                'reception_ended': reception.get('ReceptionEnded'),
-                'reception_canceled': reception.get('ReceptionCanceled'),
-                'check_issued': reception.get('CheckIssued')
             }
         }
 
@@ -452,8 +441,8 @@ class DataTransformer:
         lines.append(f"💊 Услуги: {services}")
 
         # Сумма
-        amount = reception.get('TotalAmount', 0)
-        lines.append(f"💰 Сумма: {amount:,.2f} ₽")
+        amount = reception.get('TotalAmount') or 0
+        lines.append(f"💰 Сумма: {float(amount):,.2f} ₽")
 
         # Комментарий из Ident
         if reception.get('Comment'):
