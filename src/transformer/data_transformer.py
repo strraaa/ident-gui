@@ -444,8 +444,8 @@ class DataTransformer:
         lines.append(f"🪑 Кабинет: {reception.get('Armchair', 'Не указан')}")
 
         # Услуги
-        services = reception.get('Services', 'Не указаны')
-        if len(services) > 200:
+        services = reception.get('Services') or 'Не указаны'
+        if services != 'Не указаны' and len(services) > 200:
             services = services[:200] + "..."
         lines.append(f"💊 Услуги: {services}")
 
