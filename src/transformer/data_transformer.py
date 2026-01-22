@@ -413,6 +413,7 @@ class DataTransformer:
                 'UF_CRM_1769008947': end_time_iso,          # Дата окончания приема
                 'UF_CRM_1769008996': reception['DoctorFullName'],  # Врач
                 'UF_CRM_1769009098': services,              # Услуги
+                'UF_CRM_1769009157': reception.get('Status', 'Запланирован'),  # Статус записи
                 'UF_CRM_1769083581481': reception.get('CardNumber', ''),  # Номер карты пациента
 
                 # Дополнительная информация (в комментарии)

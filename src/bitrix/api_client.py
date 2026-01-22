@@ -429,6 +429,7 @@ class Bitrix24Client:
                 'UF_CRM_1769008947': deal_data.get('UF_CRM_1769008947'),  # Дата окончания приема
                 'UF_CRM_1769008996': deal_data.get('UF_CRM_1769008996'),  # Врач
                 'UF_CRM_1769009098': deal_data.get('UF_CRM_1769009098'),  # Услуги
+                'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
 
                 # Дополнительные поля (для внутреннего использования)
@@ -483,6 +484,7 @@ class Bitrix24Client:
                 'UF_CRM_1769008947': deal_data.get('UF_CRM_1769008947'),  # Дата окончания приема
                 'UF_CRM_1769008996': deal_data.get('UF_CRM_1769008996'),  # Врач
                 'UF_CRM_1769009098': deal_data.get('UF_CRM_1769009098'),  # Услуги
+                'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
                 'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
             }
