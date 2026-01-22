@@ -352,7 +352,8 @@ class Bitrix24Client:
                 'SECOND_NAME': contact_data.get('second_name', ''),
                 'TYPE_ID': contact_data.get('type_id', 'CLIENT'),
                 'PHONE': [{'VALUE': contact_data['phone'], 'VALUE_TYPE': 'MOBILE'}],
-                'UF_CRM_1769083788971': contact_data.get('UF_CRM_1769083788971', '')  # Номер карты пациента
+                'UF_CRM_1769083788971': contact_data.get('UF_CRM_1769083788971', ''),  # Номер карты пациента
+                'UF_CRM_1769087537061': contact_data.get('UF_CRM_1769087537061', '')   # Родитель/Опекун
             }
 
             result = self._make_request('crm.contact.add', {'fields': fields})
@@ -430,6 +431,7 @@ class Bitrix24Client:
                 'UF_CRM_1769009098': deal_data.get('UF_CRM_1769009098'),  # Услуги
                 'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
+                'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
 
                 # Дополнительные поля (для внутреннего использования)
                 'UF_CRM_1769072841035': deal_data.get('uf_crm_ident_id'),  # ID из Ident
@@ -484,6 +486,7 @@ class Bitrix24Client:
                 'UF_CRM_1769009098': deal_data.get('UF_CRM_1769009098'),  # Услуги
                 'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
+                'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
                 'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
             }
 

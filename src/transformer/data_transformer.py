@@ -425,7 +425,8 @@ class DataTransformer:
                 'second_name': reception.get('PatientPatronymic', ''),
                 'phone': normalized_phone,
                 'type_id': 'CLIENT',  # Тип контакта - клиент
-                'UF_CRM_1769083788971': reception.get('CardNumber', '')  # Номер карты пациента
+                'UF_CRM_1769083788971': reception.get('CardNumber', ''),  # Номер карты пациента
+                'UF_CRM_1769087537061': reception.get('ParentFullName', '')  # Родитель/Опекун
             },
 
             # Сделка
@@ -442,6 +443,7 @@ class DataTransformer:
                 'UF_CRM_1769009098': services,              # Услуги
                 'UF_CRM_1769009157': reception.get('Status', 'Запланирован'),  # Статус записи
                 'UF_CRM_1769083581481': reception.get('CardNumber', ''),  # Номер карты пациента
+                'UF_CRM_1769087458477': reception.get('ParentFullName', ''),  # Родитель/Опекун
 
                 # Дополнительная информация (в комментарии)
                 'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)
@@ -485,6 +487,13 @@ class DataTransformer:
             lines.append(f"📅 Дата и время: {formatted_date}")
         else:
             lines.append("📅 Дата и время: Не указано")
+
+        # Родитель/Опекун (если указан)
+        parent_name = reception.get('ParentFullName')
+        if parent_name:
+            lines.append("")
+            lines.append("👨‍👩‍👧 РОДИТЕЛЬ/ОПЕКУН")
+            lines.append(f"  • ФИО: {parent_name}")
 
         # Врач
         lines.append("")
