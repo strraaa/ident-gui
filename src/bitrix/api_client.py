@@ -422,7 +422,6 @@ class Bitrix24Client:
                 'CONTACT_ID': contact_id,
                 'OPPORTUNITY': deal_data.get('opportunity', 0),
                 'CURRENCY_ID': deal_data.get('currency_id', 'RUB'),
-                'COMMENTS': deal_data.get('comments', ''),
 
                 # Кастомные поля (актуальные ID из Bitrix24)
                 'UF_CRM_1769008900': deal_data.get('UF_CRM_1769008900'),  # Дата начало приема
@@ -477,7 +476,6 @@ class Bitrix24Client:
                 'TITLE': deal_data.get('title'),
                 'STAGE_ID': deal_data.get('stage_id'),
                 'OPPORTUNITY': deal_data.get('opportunity'),
-                'COMMENTS': deal_data.get('comments'),
 
                 # Кастомные поля (актуальные ID из Bitrix24)
                 'UF_CRM_1769008900': deal_data.get('UF_CRM_1769008900'),  # Дата начало приема
@@ -503,6 +501,41 @@ class Bitrix24Client:
         except Bitrix24Error as e:
             logger.error(f"Ошибка обновления сделки {deal_id}: {e}")
             raise
+
+    @retry_on_api_error(max_attempts=3)
+    def add_comment_to_deal(self, deal_id: int, comment_text: str) -> bool:
+        """
+        Добавляет комментарий к сделке через Timeline API
+
+        Args:
+            deal_id: ID сделки
+            comment_text: Текст комментария
+
+        Returns:
+            True если комментарий добавлен успешно
+        """
+        try:
+            if not comment_text:
+                return True
+
+            result = self._make_request(
+                'crm.timeline.comment.add',
+                {
+                    'fields': {
+                        'ENTITY_ID': deal_id,
+                        'ENTITY_TYPE': 'deal',
+                        'COMMENT': comment_text
+                    }
+                }
+            )
+
+            logger.info(f"Добавлен комментарий к сделке ID={deal_id}")
+            return True
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка добавления комментария к сделке {deal_id}: {e}")
+            # Не падаем, если комментарий не добавился
+            return False
 
     def test_connection(self) -> bool:
         """

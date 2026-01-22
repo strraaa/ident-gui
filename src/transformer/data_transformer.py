@@ -211,6 +211,12 @@ class StageMapper:
         'Отменен': 'LOSE'                   # Сделка провалена
     }
 
+    # Финальные стадии (закрытые сделки) - НЕ обновляем
+    FINAL_STAGES = [
+        'WON',   # Сделка успешна
+        'LOSE'   # Сделка провалена
+    ]
+
     # Стадии, защищенные от автоизменения (ручные стадии менеджера)
     PROTECTED_STAGES = [
         'PREPAYMENT_INVOICE',  # Презентация плана лечения
@@ -250,13 +256,34 @@ class StageMapper:
         """
         Проверяет защищена ли стадия от автоизменения
 
+        Защищаются:
+        - Финальные стадии (WON, LOSE) - закрытые сделки
+        - Ручные стадии менеджера (PREPAYMENT_INVOICE, FINAL_INVOICE, EXECUTING, APOLOGY)
+
         Args:
             stage_id: ID стадии
 
         Returns:
             True если стадия защищена
         """
-        return stage_id in StageMapper.PROTECTED_STAGES if stage_id else False
+        if not stage_id:
+            return False
+
+        return (stage_id in StageMapper.FINAL_STAGES or
+                stage_id in StageMapper.PROTECTED_STAGES)
+
+    @staticmethod
+    def is_stage_final(stage_id: Optional[str]) -> bool:
+        """
+        Проверяет является ли стадия финальной (закрытой)
+
+        Args:
+            stage_id: ID стадии
+
+        Returns:
+            True если стадия финальная (WON или LOSE)
+        """
+        return stage_id in StageMapper.FINAL_STAGES if stage_id else False
 
 
 class ReceptionValidator:
