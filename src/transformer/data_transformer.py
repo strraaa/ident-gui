@@ -397,7 +397,8 @@ class DataTransformer:
                 'last_name': reception['PatientSurname'],
                 'second_name': reception.get('PatientPatronymic', ''),
                 'phone': normalized_phone,
-                'type_id': 'CLIENT'  # Тип контакта - клиент
+                'type_id': 'CLIENT',  # Тип контакта - клиент
+                'UF_CRM_1769083788971': reception.get('CardNumber', '')  # Номер карты пациента
             },
 
             # Сделка
@@ -412,6 +413,7 @@ class DataTransformer:
                 'UF_CRM_1769008947': end_time_iso,          # Дата окончания приема
                 'UF_CRM_1769008996': reception['DoctorFullName'],  # Врач
                 'UF_CRM_1769009098': services,              # Услуги
+                'UF_CRM_1769083581481': reception.get('CardNumber', ''),  # Номер карты пациента
 
                 # Дополнительная информация (в комментарии)
                 'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)
