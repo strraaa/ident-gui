@@ -306,6 +306,34 @@ class Bitrix24Client:
             raise
 
     @retry_on_api_error(max_attempts=3)
+    def update_lead_status(self, lead_id: int, status_id: str = 'CONVERTED') -> bool:
+        """
+        Обновляет статус лида (например, переводит в успешную стадию)
+
+        Args:
+            lead_id: ID лида
+            status_id: Новый статус (по умолчанию CONVERTED - успешно обработан)
+
+        Returns:
+            True если обновлено успешно
+        """
+        try:
+            result = self._make_request(
+                'crm.lead.update',
+                {
+                    'id': lead_id,
+                    'fields': {'STATUS_ID': status_id}
+                }
+            )
+
+            logger.info(f"Обновлен статус лида ID={lead_id} на {status_id}")
+            return True
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка обновления статуса лида {lead_id}: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
     def create_contact(self, contact_data: Dict[str, Any]) -> int:
         """
         Создает новый контакт
@@ -338,41 +366,6 @@ class Bitrix24Client:
 
         except Bitrix24Error as e:
             logger.error(f"Ошибка создания контакта: {e}")
-            raise
-
-    @retry_on_api_error(max_attempts=3)
-    def convert_lead(self, lead_id: int) -> Tuple[int, int]:
-        """
-        Конвертирует лид в контакт и сделку
-
-        Args:
-            lead_id: ID лида
-
-        Returns:
-            Кортеж (contact_id, deal_id)
-        """
-        try:
-            result = self._make_request(
-                'crm.lead.convert',
-                {
-                    'id': lead_id,
-                    'fields': {
-                        'CONTACT_ID': 0,  # Создать новый контакт
-                        'DEAL_ID': 0      # Создать новую сделку
-                    }
-                }
-            )
-
-            converted = result.get('result', {})
-            contact_id = converted.get('CONTACT_ID')
-            deal_id = converted.get('DEAL_ID')
-
-            logger.info(f"Лид {lead_id} конвертирован: контакт={contact_id}, сделка={deal_id}")
-
-            return int(contact_id), int(deal_id)
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка конвертации лида {lead_id}: {e}")
             raise
 
     @retry_on_api_error(max_attempts=3)

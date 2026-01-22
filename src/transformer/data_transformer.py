@@ -166,6 +166,7 @@ class ServicesAggregator:
     """Агрегация и форматирование услуг"""
 
     MAX_LENGTH = 3000  # Лимит Битрикс24
+    COMMENT_SERVICES_PREVIEW_LENGTH = 200  # Длина превью услуг в комментарии
 
     @staticmethod
     def aggregate(services_text: Optional[str], max_length: int = MAX_LENGTH) -> str:
@@ -243,6 +244,19 @@ class StageMapper:
         new_stage = StageMapper.STAGE_MAPPING.get(status, 'CONSULTATION_SCHEDULED')
 
         return new_stage
+
+    @staticmethod
+    def is_stage_protected(stage_id: Optional[str]) -> bool:
+        """
+        Проверяет защищена ли стадия от автоизменения
+
+        Args:
+            stage_id: ID стадии
+
+        Returns:
+            True если стадия защищена
+        """
+        return stage_id in StageMapper.PROTECTED_STAGES if stage_id else False
 
 
 class ReceptionValidator:
@@ -388,7 +402,7 @@ class DataTransformer:
 
             # Сделка
             'deal': {
-                'title': f"Запись на прием - {reception['PatientFullName']}",
+                'title': reception['PatientFullName'],
                 'stage_id': stage,
                 'opportunity': float(reception.get('TotalAmount', 0) or 0),  # Сумма (конвертируем Decimal в float)
                 'currency_id': 'RUB',
@@ -436,8 +450,8 @@ class DataTransformer:
 
         # Услуги
         services = reception.get('Services') or 'Не указаны'
-        if services != 'Не указаны' and len(services) > 200:
-            services = services[:200] + "..."
+        if services != 'Не указаны' and len(services) > ServicesAggregator.COMMENT_SERVICES_PREVIEW_LENGTH:
+            services = services[:ServicesAggregator.COMMENT_SERVICES_PREVIEW_LENGTH] + "..."
         lines.append(f"💊 Услуги: {services}")
 
         # Сумма
