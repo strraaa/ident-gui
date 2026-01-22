@@ -390,8 +390,8 @@ class Bitrix24Client:
             result = self._make_request(
                 'crm.deal.list',
                 {
-                    'filter': {'UF_CRM_IDENT_ID': ident_id},
-                    'select': ['ID', 'STAGE_ID', 'OPPORTUNITY', 'UF_CRM_IDENT_ID']
+                    'filter': {'UF_CRM_1769072841035': ident_id},  # ID из Ident
+                    'select': ['ID', 'STAGE_ID', 'OPPORTUNITY', 'UF_CRM_1769072841035']
                 }
             )
 
@@ -437,7 +437,7 @@ class Bitrix24Client:
                 'UF_CRM_1769009098': deal_data.get('UF_CRM_1769009098'),  # Услуги
 
                 # Дополнительные поля (для внутреннего использования)
-                'UF_CRM_IDENT_ID': deal_data.get('uf_crm_ident_id'),
+                'UF_CRM_1769072841035': deal_data.get('uf_crm_ident_id'),  # ID из Ident
                 'UF_CRM_FILIAL': deal_data.get('uf_crm_filial'),
                 'UF_CRM_ARMCHAIR': deal_data.get('uf_crm_armchair'),
                 'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
