@@ -390,7 +390,7 @@ class DataTransformer:
             'deal': {
                 'title': f"Запись на прием - {reception['PatientFullName']}",
                 'stage_id': stage,
-                'opportunity': reception.get('TotalAmount', 0),  # Сумма
+                'opportunity': float(reception.get('TotalAmount', 0) or 0),  # Сумма (конвертируем Decimal в float)
                 'currency_id': 'RUB',
 
                 # Кастомные поля (актуальные ID из Bitrix24)
