@@ -208,15 +208,25 @@ class IdentConnector:
         self.driver = self._detect_available_driver()
         logger.info(f"Используется ODBC Driver: {self.driver}")
 
-        # Формируем connection string с правильными таймаутами
+        # Формируем connection string
+        # Для именованных экземпляров (с \) не указываем порт - используется Named Pipes
+        if '\\' in self.server:
+            # Именованный экземпляр - Named Pipes (без порта)
+            server_string = self.server
+            logger.info(f"Именованный экземпляр обнаружен, используется Named Pipes: {server_string}")
+        else:
+            # Стандартный экземпляр или IP - TCP/IP с портом
+            server_string = f"{self.server},{self.port}"
+            logger.info(f"Стандартный экземпляр, используется TCP/IP: {server_string}")
+
         self.connection_string = (
             f"DRIVER={{{self.driver}}};"
-            f"SERVER={self.server},{self.port};"
+            f"SERVER={server_string};"
             f"DATABASE={self.database};"
             f"UID={self.username};"
             f"PWD={self.password};"
             f"Connection Timeout={self.connection_timeout};"
-            f"Query Timeout={self.query_timeout};"  # ✅ QUERY TIMEOUT!
+            f"Query Timeout={self.query_timeout};"
         )
 
         # Создаем connection pool
