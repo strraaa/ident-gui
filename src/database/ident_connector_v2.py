@@ -442,11 +442,18 @@ class IdentConnector:
             -- ✅ ОПТИМИЗАЦИЯ: OUTER APPLY вместо подзапросов
             OUTER APPLY (
                 SELECT
-                    STRING_AGG(si.Name, ', ') AS ServicesText,
+                    -- Для SQL Server 2012-2016 (совместимость)
+                    STUFF((
+                        SELECT ', ' + si_inner.Name
+                        FROM OrderServiceRelation osr_inner
+                        INNER JOIN ServiceItemPrices sip_inner ON osr_inner.ID_ServicePrices = sip_inner.ID
+                        INNER JOIN ServiceItems si_inner ON sip_inner.ID_ServiceItems = si_inner.ID
+                        WHERE osr_inner.ID_Orders = o.ID
+                        FOR XML PATH(''), TYPE
+                    ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS ServicesText,
                     SUM(osr.CountService * sip.Price - ISNULL(osr.DiscountSum, 0)) AS TotalAmount
                 FROM OrderServiceRelation osr
                 INNER JOIN ServiceItemPrices sip ON osr.ID_ServicePrices = sip.ID
-                INNER JOIN ServiceItems si ON sip.ID_ServiceItems = si.ID
                 WHERE osr.ID_Orders = o.ID
             ) services_agg
 
