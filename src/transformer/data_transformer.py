@@ -18,7 +18,9 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+# Используем настроенный logger из custom_logger_v2
+from src.logger.custom_logger_v2 import get_logger
+logger = get_logger('ident_integration')
 
 
 @dataclass
