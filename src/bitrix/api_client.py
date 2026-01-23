@@ -531,6 +531,42 @@ class Bitrix24Client:
             raise
 
     @retry_on_api_error(max_attempts=3)
+    def get_deal_treatment_plan_data(self, deal_id: int) -> Optional[Dict[str, str]]:
+        """
+        Получает данные плана лечения из сделки
+
+        Args:
+            deal_id: ID сделки
+
+        Returns:
+            Словарь с plan (JSON) и hash или None
+        """
+        try:
+            result = self._make_request(
+                'crm.deal.get',
+                {
+                    'id': deal_id
+                }
+            )
+
+            deal = result.get('result', {})
+
+            plan_json = deal.get('UF_CRM_TREATMENT_PLAN', '')
+            plan_hash = deal.get('UF_CRM_TREATMENT_PLAN_HASH', '')
+
+            if plan_json or plan_hash:
+                return {
+                    'plan': plan_json,
+                    'hash': plan_hash
+                }
+
+            return None
+
+        except Bitrix24Error as e:
+            logger.warning(f"Ошибка получения данных плана для сделки {deal_id}: {e}")
+            return None
+
+    @retry_on_api_error(max_attempts=3)
     def create_deal(self, deal_data: Dict[str, Any], contact_id: int) -> int:
         """
         Создает новую сделку
@@ -568,6 +604,10 @@ class Bitrix24Client:
                 'UF_CRM_CARD_NUMBER': deal_data.get('uf_crm_card_number'),
                 'UF_CRM_ORDER_DATE': deal_data.get('uf_crm_order_date'),
                 'UF_CRM_DOCTOR_SPECIALITY': deal_data.get('uf_crm_doctor_speciality'),
+
+                # План лечения
+                'UF_CRM_TREATMENT_PLAN': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
+                'UF_CRM_TREATMENT_PLAN_HASH': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
 
             # Удаляем None значения
@@ -615,6 +655,10 @@ class Bitrix24Client:
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
                 'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
                 'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
+
+                # План лечения
+                'UF_CRM_TREATMENT_PLAN': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
+                'UF_CRM_TREATMENT_PLAN_HASH': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
 
             # Удаляем None значения

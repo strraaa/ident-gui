@@ -762,6 +762,130 @@ class IdentConnector:
             logger.error(f"Неожиданная ошибка при извлечении плана #{plan_id}: {e}", exc_info=True)
             raise
 
+    @retry_on_db_error(max_attempts=3, delay=1.0, backoff=2.0)
+    def get_treatment_plans_by_card_number(
+        self,
+        card_number: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Извлекает планы лечения пациента по номеру карты
+
+        Args:
+            card_number: Номер карты пациента
+
+        Returns:
+            Список планов лечения
+        """
+        # Валидация
+        if not card_number or not str(card_number).strip():
+            raise ValueError("card_number не может быть пустым")
+
+        query = """
+        SELECT
+            -- ПЛАН
+            tp.ID AS PlanID,
+            tp.Name AS PlanName,
+            tp.DateTimeCreated AS CreatedAt,
+            tp.IsActive AS IsActive,
+
+            -- ПАЦИЕНТ
+            p.Surname + ' ' + p.Name + ISNULL(' ' + p.Patronymic, '') AS PatientFullName,
+            pat.CardNumber AS CardNumber,
+
+            -- ВРАЧ
+            ps_plan.Surname + ' ' + ps_plan.Name + ISNULL(' ' + ps_plan.Patronymic, '') AS DoctorFullName,
+            pn_plan.NameProfession AS DoctorSpeciality,
+
+            -- ЭТАПЫ
+            tps.ID AS StageID,
+            tps.Name AS StageName,
+            tps.[Order] AS StageOrder,
+
+            -- ЭЛЕМЕНТЫ
+            tpe.ID AS ElementID,
+            tpe.Name AS ElementName,
+            tpe.[Order] AS ElementOrder,
+
+            -- УСЛУГИ
+            si.ID AS ServiceID,
+            si.Name AS ServiceName,
+            sc.Name AS ServiceCategory,
+            sf.Name AS ServiceFolder,
+
+            -- ЦЕНЫ
+            sip.Price AS Price,
+            tper.DiscountSum AS DiscountAmount,
+            (sip.Price - ISNULL(tper.DiscountSum, 0)) AS TotalAmount,
+
+            -- ЗУБЫ
+            tper.TeethLong AS TeethMask,
+
+            -- СТАТУС
+            CASE
+                WHEN osr.ID IS NOT NULL AND o.DateTimeBillFormed IS NOT NULL THEN 'Выполнено и оплачено'
+                WHEN osr.ID IS NOT NULL THEN 'Выполнено'
+                ELSE 'Не выполнено'
+            END AS Status,
+
+            -- ДЕТАЛИ ВЫПОЛНЕНИЯ
+            o.ID AS OrderID,
+            o.DateTimeOrder AS ExecutionDate,
+            r.ID AS ReceptionID,
+            r.PlanStart AS ReceptionDate
+
+        FROM TreatmentPlans tp
+            INNER JOIN Patients pat ON tp.ID_Patients = pat.ID_Persons
+            INNER JOIN Persons p ON pat.ID_Persons = p.ID
+            LEFT JOIN Staffs s_plan ON tp.ID_Staffs = s_plan.ID_Persons
+            LEFT JOIN Persons ps_plan ON s_plan.ID_Persons = ps_plan.ID
+            LEFT JOIN Items i_plan ON s_plan.ID_Persons = i_plan.ID_Staffs
+            LEFT JOIN ProfessionNames pn_plan ON i_plan.ID_ProfessionNames = pn_plan.ID
+            LEFT JOIN TreatmentPlanElementRelations tper ON tp.ID = tper.ID_TreatmentPlans
+            LEFT JOIN TreatmentPlanStages tps ON tper.ID_TreatmentPlanStages = tps.ID
+            LEFT JOIN TreatmentPlanElements tpe ON tper.ID_TreatmentPlanElements = tpe.ID
+            LEFT JOIN ServiceItemPrices sip ON tper.ID_ServicePrices = sip.ID
+            LEFT JOIN ServiceItems si ON sip.ID_ServiceItems = si.ID
+            LEFT JOIN ServiceItemContents sic ON si.ID = sic.ID_ServiceItems AND sic.DateTimeTo IS NULL
+            LEFT JOIN ServiceFolders sf ON sic.ID_ServiceFoldersParent = sf.ID
+            LEFT JOIN ServiceCategories sc ON sf.ID_ServiceCategories = sc.ID
+            LEFT JOIN OrderServiceRelation osr ON tper.ID = osr.ID_TreatmentPlanElementRelations
+            LEFT JOIN Orders o ON osr.ID_Orders = o.ID
+            LEFT JOIN Receptions r ON o.ID_Receptions = r.ID
+
+        WHERE
+            pat.CardNumber = ?
+
+        ORDER BY
+            tp.DateTimeCreated DESC,
+            tps.[Order],
+            tpe.[Order],
+            si.Name
+        """
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (str(card_number),))
+
+                columns = [column[0] for column in cursor.description]
+                results = []
+
+                while True:
+                    rows = cursor.fetchmany(100)
+                    if not rows:
+                        break
+                    results.extend(dict(zip(columns, row)) for row in rows)
+
+                cursor.close()
+                return results
+
+        except pyodbc.Error as e:
+            logger.error(f"Ошибка БД при извлечении планов лечения по карте {card_number}: {e}", exc_info=True)
+            raise RuntimeError(f"Ошибка при извлечении планов лечения из БД Ident: {e}") from e
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при извлечении планов по карте {card_number}: {e}", exc_info=True)
+            raise
+
     @retry_on_db_error(max_attempts=2, delay=0.5, backoff=2.0)
     def get_statistics(self) -> Dict[str, int]:
         """Возвращает статистику БД"""
