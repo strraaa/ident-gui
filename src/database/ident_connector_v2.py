@@ -607,6 +607,7 @@ class IdentConnector:
             p.Surname = ?
             AND p.Name = ?
             AND (? = '' OR p.Patronymic = ?)
+            AND tp.IsActive = 1
 
         ORDER BY
             tp.DateTimeCreated DESC,
@@ -731,6 +732,7 @@ class IdentConnector:
 
         WHERE
             tp.ID = ?
+            AND tp.IsActive = 1
 
         ORDER BY
             tps.[Order],
@@ -854,6 +856,7 @@ class IdentConnector:
 
         WHERE
             pat.CardNumber = ?
+            AND tp.IsActive = 1
 
         ORDER BY
             tp.DateTimeCreated DESC,
