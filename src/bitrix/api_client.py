@@ -648,24 +648,53 @@ class Bitrix24Client:
             if not comment_text:
                 return True
 
+            # Используем crm.timeline.comment.add с правильной структурой
             result = self._make_request(
                 'crm.timeline.comment.add',
                 {
                     'fields': {
                         'ENTITY_ID': deal_id,
                         'ENTITY_TYPE': 'deal',
-                        'COMMENT': comment_text
+                        'COMMENT': comment_text,
+                        'AUTHOR_ID': 1  # ID пользователя (1 - администратор)
                     }
                 }
             )
 
-            logger.info(f"Добавлен комментарий к сделке ID={deal_id}")
+            comment_id = result.get('result')
+            logger.info(f"Добавлен комментарий ID={comment_id} к сделке ID={deal_id}")
             return True
 
         except Bitrix24Error as e:
-            logger.error(f"Ошибка добавления комментария к сделке {deal_id}: {e}")
-            # Не падаем, если комментарий не добавился
-            return False
+            logger.warning(f"Ошибка Timeline API для сделки {deal_id}: {e}")
+            # Пробуем альтернативный метод через активность
+            try:
+                result = self._make_request(
+                    'crm.activity.add',
+                    {
+                        'fields': {
+                            'OWNER_TYPE_ID': 2,  # 2 = Deal (сделка)
+                            'OWNER_ID': deal_id,
+                            'PROVIDER_ID': 'CRM_TIMELINE',
+                            'PROVIDER_TYPE_ID': 'COMMENT',
+                            'SUBJECT': 'Комментарий из IDENT',
+                            'DESCRIPTION': comment_text,
+                            'DESCRIPTION_TYPE': 1,  # 1 = Plain text
+                            'COMPLETED': 'Y',
+                            'PRIORITY': 2,  # 2 = Medium
+                            'RESPONSIBLE_ID': 1
+                        }
+                    }
+                )
+
+                activity_id = result.get('result')
+                logger.info(f"Добавлена активность ID={activity_id} к сделке ID={deal_id}")
+                return True
+
+            except Bitrix24Error as e2:
+                logger.error(f"Ошибка добавления комментария к сделке {deal_id}: Timeline={e}, Activity={e2}")
+                # Не падаем, если комментарий не добавился
+                return False
 
     def test_connection(self) -> bool:
         """
