@@ -376,13 +376,7 @@ class IdentConnector:
             p.Patronymic AS PatientPatronymic,
             pat.CardNumber AS CardNumber,
             p.MobilePhone AS PatientPhone,
-
-            -- Родитель/Опекун
-            CASE
-                WHEN parent.Surname IS NOT NULL
-                THEN parent.Surname + ' ' + parent.Name + ISNULL(' ' + parent.Patronymic, '')
-                ELSE NULL
-            END AS ParentFullName,
+            pat.ParentSNP AS ParentFullName,  -- Родитель/Опекун (ФИО)
 
             -- Врач
             ps.Surname + ' ' + ps.Name + ISNULL(' ' + ps.Patronymic, '') AS DoctorFullName,
@@ -431,9 +425,6 @@ class IdentConnector:
             -- Пациент
             INNER JOIN Patients pat ON r.ID_Patients = pat.ID_Persons
             INNER JOIN Persons p ON pat.ID_Persons = p.ID
-
-            -- Родитель/Опекун (Representative)
-            LEFT JOIN Persons parent ON pat.ID_Representative = parent.ID
 
             -- Врач
             LEFT JOIN Staffs s ON r.ID_Staffs = s.ID_Persons
