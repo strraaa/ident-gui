@@ -239,6 +239,76 @@ class Bitrix24Client:
             raise Bitrix24Error(f"Ошибка HTTP запроса: {e}")
 
     @retry_on_api_error(max_attempts=3)
+    def find_contact_by_phone_and_name(
+        self,
+        phone: str,
+        name: str,
+        last_name: str,
+        second_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Ищет контакт по телефону И ФИО
+
+        Это необходимо, т.к. по одному телефону может быть несколько людей
+        (например, члены семьи используют один номер)
+
+        Args:
+            phone: Номер телефона (нормализованный)
+            name: Имя
+            last_name: Фамилия
+            second_name: Отчество (опционально)
+
+        Returns:
+            Данные контакта или None если не найден
+        """
+        try:
+            result = self._make_request(
+                'crm.contact.list',
+                {
+                    'filter': {'PHONE': phone},
+                    'select': ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE']
+                }
+            )
+
+            contacts = result.get('result', [])
+
+            if not contacts:
+                logger.info(f"Контакты не найдены для телефона {phone}")
+                return None
+
+            # Ищем контакт с совпадающим ФИО
+            for contact in contacts:
+                contact_name = (contact.get('NAME') or '').strip().lower()
+                contact_last_name = (contact.get('LAST_NAME') or '').strip().lower()
+                contact_second_name = (contact.get('SECOND_NAME') or '').strip().lower()
+
+                # Сравниваем ФИО (без учета регистра)
+                name_match = contact_name == name.strip().lower()
+                last_name_match = contact_last_name == last_name.strip().lower()
+
+                # Отчество проверяем только если оно указано у обоих
+                second_name_match = True
+                if second_name and contact_second_name:
+                    second_name_match = contact_second_name == second_name.strip().lower()
+
+                if name_match and last_name_match and second_name_match:
+                    logger.info(
+                        f"Найден контакт ID={contact['ID']} для {last_name} {name} "
+                        f"(тел: {phone[:10]}...)"
+                    )
+                    return contact
+
+            logger.info(
+                f"Контакт с ФИО '{last_name} {name} {second_name or ''}' "
+                f"не найден для телефона {phone} (найдено контактов: {len(contacts)})"
+            )
+            return None
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка поиска контакта: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
     def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """
         Ищет контакт по телефону
@@ -270,6 +340,63 @@ class Bitrix24Client:
 
         except Bitrix24Error as e:
             logger.error(f"Ошибка поиска контакта: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
+    def find_lead_by_phone_and_name(
+        self,
+        phone: str,
+        name: str,
+        last_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Ищет лид по телефону И ФИО
+
+        Args:
+            phone: Номер телефона
+            name: Имя
+            last_name: Фамилия
+
+        Returns:
+            Данные лида или None
+        """
+        try:
+            result = self._make_request(
+                'crm.lead.list',
+                {
+                    'filter': {'PHONE': phone},
+                    'select': ['ID', 'NAME', 'LAST_NAME', 'STATUS_ID']
+                }
+            )
+
+            leads = result.get('result', [])
+
+            if not leads:
+                return None
+
+            # Ищем лид с совпадающим ФИО
+            for lead in leads:
+                lead_name = (lead.get('NAME') or '').strip().lower()
+                lead_last_name = (lead.get('LAST_NAME') or '').strip().lower()
+
+                # Сравниваем ФИО (без учета регистра)
+                name_match = lead_name == name.strip().lower()
+                last_name_match = lead_last_name == last_name.strip().lower()
+
+                if name_match and last_name_match:
+                    logger.info(
+                        f"Найден лид ID={lead['ID']} для {last_name} {name} "
+                        f"(тел: {phone[:10]}...)"
+                    )
+                    return lead
+
+            logger.info(
+                f"Лид с ФИО '{last_name} {name}' не найден для телефона {phone}"
+            )
+            return None
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка поиска лида: {e}")
             raise
 
     @retry_on_api_error(max_attempts=3)
