@@ -551,8 +551,8 @@ class Bitrix24Client:
 
             deal = result.get('result', {})
 
-            plan_json = deal.get('UF_CRM_TREATMENT_PLAN', '')
-            plan_hash = deal.get('UF_CRM_TREATMENT_PLAN_HASH', '')
+            plan_json = deal.get('UF_CRM_1769167266723', '')
+            plan_hash = deal.get('UF_CRM_1769167398642', '')
 
             if plan_json or plan_hash:
                 return {
@@ -606,8 +606,8 @@ class Bitrix24Client:
                 'UF_CRM_DOCTOR_SPECIALITY': deal_data.get('uf_crm_doctor_speciality'),
 
                 # План лечения
-                'UF_CRM_TREATMENT_PLAN': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
-                'UF_CRM_TREATMENT_PLAN_HASH': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
+                'UF_CRM_1769167266723': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
+                'UF_CRM_1769167398642': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
 
             # Удаляем None значения
@@ -657,8 +657,8 @@ class Bitrix24Client:
                 'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
 
                 # План лечения
-                'UF_CRM_TREATMENT_PLAN': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
-                'UF_CRM_TREATMENT_PLAN_HASH': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
+                'UF_CRM_1769167266723': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
+                'UF_CRM_1769167398642': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
 
             # Удаляем None значения
