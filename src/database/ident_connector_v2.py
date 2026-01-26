@@ -508,6 +508,179 @@ class IdentConnector:
             raise
 
     @retry_on_db_error(max_attempts=3, delay=1.0, backoff=2.0)
+    def get_receptions_iter(
+        self,
+        last_sync_time: Optional[datetime] = None,
+        batch_size: int = 50,
+        initial_days: int = 7,
+        fetch_size: int = 100
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Извлекает записи из БД Ident через ГЕНЕРАТОР (оптимизация памяти)
+
+        Возвращает записи по мере их получения из БД, не загружая все в память.
+        Используйте этот метод для больших объемов данных.
+
+        Args:
+            last_sync_time: Время последней синхронизации
+            batch_size: Размер пакета (лимит SQL TOP)
+            initial_days: Глубина начальной синхронизации в днях (1-365)
+            fetch_size: Размер батча для fetchmany (оптимизация)
+
+        Yields:
+            Словарь с данными одной записи
+
+        Raises:
+            ValueError: При невалидных параметрах
+            RuntimeError: При ошибке БД
+        """
+        # Валидация входных параметров
+        self._validate_batch_size(batch_size)
+        self._validate_initial_days(initial_days)
+        self._validate_last_sync_time(last_sync_time)
+
+        # Если это первая синхронизация
+        if last_sync_time is None:
+            last_sync_time = datetime.now() - timedelta(days=initial_days)
+            logger.info(f"Первая синхронизация: загружаем данные за последние {initial_days} дней")
+
+        # Используем тот же запрос что и в get_receptions()
+        query = """
+        SELECT TOP (?)
+            -- Данные записи
+            r.ID AS ReceptionID,
+            r.PlanStart AS StartTime,
+            r.PlanEnd AS EndTime,
+
+            -- Пациент
+            p.Surname + ' ' + p.Name + ISNULL(' ' + p.Patronymic, '') AS PatientFullName,
+            p.Surname AS PatientSurname,
+            p.Name AS PatientName,
+            p.Patronymic AS PatientPatronymic,
+            pat.CardNumber AS CardNumber,
+            p.MobilePhone AS PatientPhone,
+            pat.ParentSNP AS ParentFullName,
+
+            -- Врач
+            ps.Surname + ' ' + ps.Name + ISNULL(' ' + ps.Patronymic, '') AS DoctorFullName,
+            ps.Surname AS DoctorSurname,
+            ps.Name AS DoctorName,
+            ps.Patronymic AS DoctorPatronymic,
+            pn.NameProfession AS Speciality,
+
+            -- Филиал и кабинет
+            COALESCE(oc_order.Name, oc_armchair.Name, 'Не указан') AS Filial,
+            a.NameArmchair AS Armchair,
+
+            -- Агрегированные услуги
+            services_agg.ServicesText AS Services,
+            services_agg.TotalAmount AS TotalAmount,
+
+            -- Статус
+            CASE
+                WHEN r.ReceptionCanceled IS NOT NULL THEN 'Отменен'
+                WHEN r.CheckIssued IS NOT NULL THEN 'Завершен (счет выдан)'
+                WHEN r.ReceptionEnded IS NOT NULL THEN 'Завершен'
+                WHEN r.ReceptionStarted IS NOT NULL THEN 'В процессе'
+                WHEN r.PatientAppeared IS NOT NULL THEN 'Пациент пришел'
+                ELSE 'Запланирован'
+            END AS Status,
+
+            -- Временные метки
+            r.PatientAppeared AS PatientAppeared,
+            r.ReceptionStarted AS ReceptionStarted,
+            r.ReceptionEnded AS ReceptionEnded,
+            r.ReceptionCanceled AS ReceptionCanceled,
+            r.CheckIssued AS CheckIssued,
+
+            -- Даты заказа
+            o.DateTimeOrder AS OrderDate,
+            o.DateTimeBillFormed AS BillFormedDate,
+
+            -- Комментарий
+            r.Comment AS Comment,
+
+            -- Метки времени для инкрементальной синхронизации
+            r.DateTimeAdded AS CreatedAt,
+            r.DateTimeChanged AS ChangedAt
+
+        FROM Receptions r
+            INNER JOIN Patients pat ON r.ID_Patients = pat.ID_Persons
+            INNER JOIN Persons p ON pat.ID_Persons = p.ID
+            LEFT JOIN Staffs s ON r.ID_Staffs = s.ID_Persons
+            LEFT JOIN Persons ps ON s.ID_Persons = ps.ID
+            LEFT JOIN Items i ON s.ID_Persons = i.ID_Staffs
+            LEFT JOIN ProfessionNames pn ON i.ID_ProfessionNames = pn.ID
+            LEFT JOIN Armchairs a ON r.ID_Armchairs = a.ID
+            LEFT JOIN OwnCompanies oc_armchair ON a.ID_OwnCompanies = oc_armchair.ID
+            LEFT JOIN Orders o ON r.ID = o.ID_Receptions
+            LEFT JOIN OwnCompanies oc_order ON o.ID_OwnCompanies = oc_order.ID
+
+            OUTER APPLY (
+                SELECT
+                    STUFF((
+                        SELECT ', ' + si_inner.Name
+                        FROM OrderServiceRelation osr_inner
+                        INNER JOIN ServiceItemPrices sip_inner ON osr_inner.ID_ServicePrices = sip_inner.ID
+                        INNER JOIN ServiceItems si_inner ON sip_inner.ID_ServiceItems = si_inner.ID
+                        WHERE osr_inner.ID_Orders = o.ID
+                        FOR XML PATH(''), TYPE
+                    ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS ServicesText,
+                    SUM(osr.CountService * sip.Price - ISNULL(osr.DiscountSum, 0)) AS TotalAmount
+                FROM OrderServiceRelation osr
+                INNER JOIN ServiceItemPrices sip ON osr.ID_ServicePrices = sip.ID
+                WHERE osr.ID_Orders = o.ID
+            ) services_agg
+
+        WHERE
+            (
+                r.DateTimeAdded > ?
+                OR r.DateTimeChanged > ?
+                OR r.PatientAppeared > ?
+                OR r.ReceptionStarted > ?
+                OR r.ReceptionEnded > ?
+                OR r.ReceptionCanceled > ?
+            )
+
+        ORDER BY r.PlanStart DESC, r.ID DESC
+        """
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    query,
+                    (
+                        batch_size,
+                        last_sync_time, last_sync_time, last_sync_time,
+                        last_sync_time, last_sync_time, last_sync_time
+                    )
+                )
+
+                columns = [column[0] for column in cursor.description]
+                total_count = 0
+
+                # ✅ ГЕНЕРАТОР: Возвращаем записи по мере получения
+                while True:
+                    rows = cursor.fetchmany(fetch_size)
+                    if not rows:
+                        break
+
+                    for row in rows:
+                        total_count += 1
+                        yield dict(zip(columns, row))
+
+                cursor.close()
+                logger.info(f"Извлечено записей (генератор): {total_count}")
+
+        except pyodbc.Error as e:
+            logger.error(f"Ошибка БД при извлечении записей (генератор): {e}", exc_info=True)
+            raise RuntimeError(f"Ошибка при извлечении записей из БД Ident: {e}") from e
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при извлечении записей (генератор): {e}", exc_info=True)
+            raise
+
+    @retry_on_db_error(max_attempts=3, delay=1.0, backoff=2.0)
     def get_treatment_plans_by_patient_name(
         self,
         patient_full_name: str

@@ -215,7 +215,15 @@ class Bitrix24Client:
             response.raise_for_status()
 
             # Парсим JSON
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError as e:  # JSONDecodeError является подклассом ValueError
+                logger.error(
+                    f"Битрикс24 вернул невалидный JSON. "
+                    f"Status: {response.status_code}, "
+                    f"Content: {response.text[:500]}..."
+                )
+                raise Bitrix24Error(f"Невалидный JSON в ответе от Битрикс24: {e}")
 
             # Проверяем наличие ошибки в ответе
             if 'error' in data:
@@ -282,19 +290,29 @@ class Bitrix24Client:
                 contact_last_name = (contact.get('LAST_NAME') or '').strip().lower()
                 contact_second_name = (contact.get('SECOND_NAME') or '').strip().lower()
 
-                # Сравниваем ФИО (без учета регистра)
-                name_match = contact_name == name.strip().lower()
-                last_name_match = contact_last_name == last_name.strip().lower()
+                # Нормализуем входные данные
+                search_name = name.strip().lower() if name else ''
+                search_last_name = last_name.strip().lower() if last_name else ''
+                search_second_name = second_name.strip().lower() if second_name else ''
 
-                # Отчество проверяем только если оно указано у обоих
-                second_name_match = True
-                if second_name and contact_second_name:
-                    second_name_match = contact_second_name == second_name.strip().lower()
+                # Пропускаем пустые имена/фамилии
+                if not search_name or not search_last_name:
+                    continue
+
+                # Сравниваем ФИО (без учета регистра)
+                name_match = contact_name == search_name
+                last_name_match = contact_last_name == search_last_name
+
+                # ✅ УЛУЧШЕННАЯ ЛОГИКА: Отчество должно совпадать точно
+                # Если у одного есть отчество, а у другого нет - это РАЗНЫЕ люди
+                second_name_match = contact_second_name == search_second_name
 
                 if name_match and last_name_match and second_name_match:
+                    # Маскируем телефон для логов
+                    masked_phone = f"+7XXX***{phone[-4:]}" if len(phone) > 4 else "***"
                     logger.info(
-                        f"Найден контакт ID={contact['ID']} для {last_name} {name} "
-                        f"(тел: {phone[:10]}...)"
+                        f"Найден контакт ID={contact['ID']} для {search_last_name} {search_name} "
+                        f"{search_second_name or ''} (тел: {masked_phone})"
                     )
                     return contact
 
