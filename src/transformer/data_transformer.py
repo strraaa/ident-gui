@@ -205,7 +205,7 @@ class StageMapper:
     STAGE_MAPPING = {
         'Запланирован': 'NEW',              # Запись на консультацию
         'Пациент пришел': 'NEW',            # Запись на консультацию
-        'В процессе': 'PREPARATION',        # Консультация проведена
+        'В процессе': 'UC_NO40X0',          # Лечение (изменено с PREPARATION)
         'Завершен': 'UC_NO40X0',            # Лечение
         'Завершен (счет выдан)': 'WON',     # Сделка успешна
         'Отменен': 'LOSE'                   # Сделка провалена
@@ -247,7 +247,7 @@ class StageMapper:
             return current_stage
 
         # Определяем новую стадию
-        new_stage = StageMapper.STAGE_MAPPING.get(status, 'CONSULTATION_SCHEDULED')
+        new_stage = StageMapper.STAGE_MAPPING.get(status, 'NEW')
 
         return new_stage
 
