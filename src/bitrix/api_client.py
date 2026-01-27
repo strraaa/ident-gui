@@ -847,10 +847,12 @@ class Bitrix24Client:
         results = self.batch_execute(commands)
 
         # Парсим результаты
+        # ✅ FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
         contacts = {}
         for phone in phones:
             if phone in results:
-                contact_list = results[phone].get('result', [])
+                # Результат уже является списком контактов
+                contact_list = results[phone] if isinstance(results[phone], list) else []
                 contacts[phone] = contact_list[0] if contact_list else None
             else:
                 contacts[phone] = None
@@ -881,10 +883,12 @@ class Bitrix24Client:
         results = self.batch_execute(commands)
 
         # Парсим результаты
+        # ✅ FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
         deals = {}
         for ident_id in ident_ids:
             if ident_id in results:
-                deal_list = results[ident_id].get('result', [])
+                # Результат уже является списком сделок
+                deal_list = results[ident_id] if isinstance(results[ident_id], list) else []
                 deals[ident_id] = deal_list[0] if deal_list else None
             else:
                 deals[ident_id] = None
