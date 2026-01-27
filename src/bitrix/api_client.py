@@ -758,6 +758,133 @@ class Bitrix24Client:
                 # Не падаем, если комментарий не добавился
                 return False
 
+    @retry_on_api_error(max_attempts=3)
+    def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False) -> Dict[str, Any]:
+        """
+        ✅ BATCH ОПТИМИЗАЦИЯ: Выполняет несколько команд за один запрос
+
+        Args:
+            commands: Словарь {command_name: "method?params"}
+                     Например: {"contact": "crm.contact.get?id=123"}
+            halt_on_error: Остановить выполнение при первой ошибке
+
+        Returns:
+            Словарь результатов {command_name: result}
+
+        Example:
+            results = client.batch_execute({
+                "find_contact": "crm.contact.list?filter[PHONE]=+79991234567",
+                "find_deal": "crm.deal.list?filter[UF_CRM_1769072841035]=F1_12345"
+            })
+            contact = results['find_contact']['result'][0]
+            deal = results['find_deal']['result'][0]
+
+        Note:
+            - Максимум 50 команд в одном batch запросе
+            - Команды выполняются параллельно (быстрее чем последовательно)
+            - Экономит rate limit (1 запрос вместо N)
+        """
+        if not commands:
+            return {}
+
+        if len(commands) > 50:
+            raise ValueError("Batch поддерживает максимум 50 команд за раз")
+
+        try:
+            result = self._make_request(
+                'batch',
+                {
+                    'halt': 1 if halt_on_error else 0,
+                    'cmd': commands
+                }
+            )
+
+            batch_result = result.get('result', {})
+            result_data = batch_result.get('result', {})
+
+            # Логируем ошибки если есть
+            if 'result_error' in batch_result:
+                for cmd_name, error in batch_result['result_error'].items():
+                    logger.warning(f"Batch команда '{cmd_name}' завершилась с ошибкой: {error}")
+
+            logger.debug(f"Batch выполнен: {len(commands)} команд, успешно: {len(result_data)}")
+
+            return result_data
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка batch запроса: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
+    def batch_find_contacts_by_phones(self, phones: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+        """
+        ✅ BATCH ОПТИМИЗАЦИЯ: Ищет несколько контактов по телефонам за один запрос
+
+        Args:
+            phones: Список телефонов
+
+        Returns:
+            Словарь {phone: contact_data или None}
+        """
+        if not phones:
+            return {}
+
+        # Формируем batch команды (максимум 50 за раз)
+        commands = {}
+        for phone in phones[:50]:
+            # Экранируем специальные символы в телефоне для использования в query string
+            safe_phone = phone.replace('+', '%2B')
+            commands[phone] = f"crm.contact.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=SECOND_NAME&select[]=PHONE"
+
+        results = self.batch_execute(commands)
+
+        # Парсим результаты
+        contacts = {}
+        for phone in phones:
+            if phone in results:
+                contact_list = results[phone].get('result', [])
+                contacts[phone] = contact_list[0] if contact_list else None
+            else:
+                contacts[phone] = None
+
+        logger.info(f"Batch поиск контактов: запрошено {len(phones)}, найдено {sum(1 for c in contacts.values() if c)}")
+
+        return contacts
+
+    @retry_on_api_error(max_attempts=3)
+    def batch_find_deals_by_ident_ids(self, ident_ids: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+        """
+        ✅ BATCH ОПТИМИЗАЦИЯ: Ищет несколько сделок по ID из Ident за один запрос
+
+        Args:
+            ident_ids: Список уникальных идентификаторов из Ident
+
+        Returns:
+            Словарь {ident_id: deal_data или None}
+        """
+        if not ident_ids:
+            return {}
+
+        # Формируем batch команды (максимум 50 за раз)
+        commands = {}
+        for ident_id in ident_ids[:50]:
+            commands[ident_id] = f"crm.deal.list?filter[UF_CRM_1769072841035]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]=UF_CRM_1769072841035"
+
+        results = self.batch_execute(commands)
+
+        # Парсим результаты
+        deals = {}
+        for ident_id in ident_ids:
+            if ident_id in results:
+                deal_list = results[ident_id].get('result', [])
+                deals[ident_id] = deal_list[0] if deal_list else None
+            else:
+                deals[ident_id] = None
+
+        logger.info(f"Batch поиск сделок: запрошено {len(ident_ids)}, найдено {sum(1 for d in deals.values() if d)}")
+
+        return deals
+
     def test_connection(self) -> bool:
         """
         Тестирует подключение к API
