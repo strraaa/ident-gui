@@ -613,6 +613,7 @@ class Bitrix24Client:
                 'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
                 'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
+                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  # ✅ Комментарий из IDENT
 
                 # Дополнительные поля (для внутреннего использования)
                 'UF_CRM_1769072841035': deal_data.get('uf_crm_ident_id'),  # ID из Ident
@@ -672,6 +673,7 @@ class Bitrix24Client:
                 'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
                 'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
+                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  # ✅ Комментарий из IDENT
                 'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
 
                 # План лечения

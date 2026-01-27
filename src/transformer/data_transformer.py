@@ -444,6 +444,7 @@ class DataTransformer:
                 'UF_CRM_1769009157': reception.get('Status', 'Запланирован'),  # Статус записи
                 'UF_CRM_1769083581481': reception.get('CardNumber', ''),  # Номер карты пациента
                 'UF_CRM_1769087458477': reception.get('ParentFullName', ''),  # Родитель/Опекун
+                'UF_CRM_1769494714842': reception.get('Comment', ''),  # ✅ Комментарий из IDENT
 
                 # Дополнительная информация (в комментарии)
                 'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)
@@ -452,104 +453,12 @@ class DataTransformer:
                 'uf_crm_status': reception.get('Status', 'Запланирован'),
                 'uf_crm_card_number': reception.get('CardNumber', ''),
                 'uf_crm_order_date': order_date_iso,
-                'uf_crm_doctor_speciality': reception.get('Speciality', ''),
-
-                # Комментарий
-                'comments': self._format_comment(reception)
+                'uf_crm_doctor_speciality': reception.get('Speciality', '')
             }
         }
 
         logger.debug(f"Запись {unique_id} успешно трансформирована")
         return transformed
-
-    def _format_comment(self, reception: Dict[str, Any]) -> str:
-        """
-        Форматирует комментарий для сделки
-
-        Args:
-            reception: Данные записи
-
-        Returns:
-            Отформатированный комментарий
-        """
-        lines = []
-
-        # Заголовок
-        lines.append("═══════════════════════════════════════")
-        lines.append("📋 ИНФОРМАЦИЯ О ПРИЕМЕ")
-        lines.append("═══════════════════════════════════════")
-        lines.append("")
-
-        # Дата и время
-        start_time = reception.get('StartTime')
-        if start_time:
-            formatted_date = start_time.strftime('%d.%m.%Y в %H:%M')
-            lines.append(f"📅 Дата и время: {formatted_date}")
-        else:
-            lines.append("📅 Дата и время: Не указано")
-
-        # Родитель/Опекун (если указан)
-        parent_name = reception.get('ParentFullName')
-        if parent_name:
-            lines.append("")
-            lines.append("👨‍👩‍👧 РОДИТЕЛЬ/ОПЕКУН")
-            lines.append(f"  • ФИО: {parent_name}")
-
-        # Врач
-        lines.append("")
-        lines.append("👨‍⚕️ ВРАЧ")
-        doctor_name = reception.get('DoctorFullName', 'Не указан')
-        speciality = reception.get('Speciality', '')
-        lines.append(f"  • ФИО: {doctor_name}")
-        if speciality:
-            lines.append(f"  • Специальность: {speciality}")
-
-        # Место приема
-        lines.append("")
-        lines.append("🏥 МЕСТО ПРИЕМА")
-        lines.append(f"  • Филиал: {reception.get('Filial', 'Не указан')}")
-        armchair = reception.get('Armchair', '')
-        if armchair:
-            lines.append(f"  • Кабинет: {armchair}")
-
-        # Услуги
-        lines.append("")
-        lines.append("💊 УСЛУГИ")
-        services = reception.get('Services') or 'Не указаны'
-        if services != 'Не указаны' and len(services) > ServicesAggregator.COMMENT_SERVICES_PREVIEW_LENGTH:
-            services = services[:ServicesAggregator.COMMENT_SERVICES_PREVIEW_LENGTH] + "..."
-        lines.append(services)
-
-        # Сумма
-        lines.append("")
-        amount = reception.get('TotalAmount') or 0
-        lines.append(f"💰 СТОИМОСТЬ: {float(amount):,.2f} ₽")
-
-        # Комментарий из Ident
-        if reception.get('Comment'):
-            lines.append("")
-            lines.append("───────────────────────────────────────")
-            lines.append("📝 КОММЕНТАРИЙ")
-            lines.append(reception['Comment'])
-            lines.append("───────────────────────────────────────")
-
-        # Футер с технической информацией
-        lines.append("")
-        lines.append(f"📊 Статус: {reception.get('Status', 'Не указан')}")
-
-        # ID из Ident
-        unique_id = UniqueIdGenerator.generate_reception_id(
-            self.filial_id,
-            reception['ReceptionID']
-        )
-        lines.append(f"🆔 ID записи: {unique_id}")
-
-        # Номер карты пациента
-        card_number = reception.get('CardNumber', '')
-        if card_number:
-            lines.append(f"💳 Карта пациента: {card_number}")
-
-        return "\n".join(lines)
 
     def transform_single(self, reception: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
