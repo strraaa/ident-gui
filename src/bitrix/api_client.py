@@ -804,8 +804,16 @@ class Bitrix24Client:
 
             # Логируем ошибки если есть
             if 'result_error' in batch_result:
-                for cmd_name, error in batch_result['result_error'].items():
-                    logger.warning(f"Batch команда '{cmd_name}' завершилась с ошибкой: {error}")
+                result_error = batch_result['result_error']
+                # result_error может быть словарём или списком в зависимости от версии API
+                if isinstance(result_error, dict):
+                    for cmd_name, error in result_error.items():
+                        logger.warning(f"Batch команда '{cmd_name}' завершилась с ошибкой: {error}")
+                elif isinstance(result_error, list):
+                    for error in result_error:
+                        logger.warning(f"Batch ошибка: {error}")
+                else:
+                    logger.warning(f"Batch содержит ошибки: {result_error}")
 
             logger.debug(f"Batch выполнен: {len(commands)} команд, успешно: {len(result_data)}")
 
