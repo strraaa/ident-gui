@@ -551,12 +551,37 @@ class DataTransformer:
 
         return "\n".join(lines)
 
+    def transform_single(self, reception: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        ✅ ОПТИМИЗАЦИЯ: Преобразует ОДНУ запись (для stream processing)
+
+        Args:
+            reception: Запись из БД
+
+        Returns:
+            Трансформированная запись или None при ошибке
+        """
+        try:
+            transformed = self.transform_reception(reception)
+
+            if not transformed:
+                logger.warning(f"Валидация не прошла для записи {reception.get('ReceptionID')}")
+
+            return transformed
+
+        except Exception as e:
+            logger.error(
+                f"Ошибка трансформации записи {reception.get('ReceptionID')}: {e}",
+                exc_info=True
+            )
+            return None
+
     def transform_batch(
         self,
         receptions: List[Dict[str, Any]]
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Преобразует пакет записей
+        Преобразует пакет записей (Legacy метод - для обратной совместимости)
 
         Args:
             receptions: Список записей из БД

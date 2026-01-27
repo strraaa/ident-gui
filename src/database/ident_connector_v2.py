@@ -30,13 +30,18 @@ logger = get_logger('ident_integration')
 class ConnectionPool:
     """Thread-safe пул соединений для переиспользования"""
 
-    def __init__(self, connection_string: str, pool_size: int = 3, max_lifetime: int = 3600):
+    def __init__(self, connection_string: str, pool_size: int = 1, max_lifetime: int = 3600):
+        """
+        ✅ ОПТИМИЗАЦИЯ: Уменьшен pool_size с 3 до 1 для экономии памяти
+        (каждое соединение ~ 3MB RAM)
+        """
         self.connection_string = connection_string
         self.pool_size = pool_size
         self.max_lifetime = max_lifetime  # Максимальное время жизни соединения (сек)
         self.pool = Queue(maxsize=pool_size)
         self.connection_times = {}  # Время создания каждого соединения
         self.lock = threading.Lock()
+        self.last_health_check = 0  # ✅ ОПТИМИЗАЦИЯ: Кеш для health check
 
         # Предварительно создаем соединения
         for _ in range(pool_size):
@@ -72,7 +77,10 @@ class ConnectionPool:
 
     @contextmanager
     def get_connection(self):
-        """Получает соединение из пула"""
+        """
+        ✅ ОПТИМИЗАЦИЯ: Health check только раз в минуту (вместо каждого запроса)
+        Экономия: ~1000 лишних SELECT 1 при обработке 1000 записей
+        """
         conn = None
         try:
             # Получаем соединение из пула
@@ -81,21 +89,27 @@ class ConnectionPool:
             except Empty:
                 raise RuntimeError("Connection pool exhausted. Не удалось получить соединение за 10 секунд.")
 
-            # Проверяем соединение
-            if not self._is_connection_alive(conn) or self._is_connection_expired(conn):
-                logger.info("Соединение умерло или истекло, создаем новое")
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+            # Проверяем соединение ТОЛЬКО раз в 60 секунд (не на каждый запрос)
+            now = time.time()
+            should_check = (now - self.last_health_check) > 60
 
-                # Удаляем из словаря времен
-                conn_id = id(conn)
-                if conn_id in self.connection_times:
-                    del self.connection_times[conn_id]
+            if should_check:
+                if not self._is_connection_alive(conn) or self._is_connection_expired(conn):
+                    logger.info("Соединение умерло или истекло, создаем новое")
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
 
-                # Создаем новое
-                conn = self._create_connection()
+                    # Удаляем из словаря времен
+                    conn_id = id(conn)
+                    if conn_id in self.connection_times:
+                        del self.connection_times[conn_id]
+
+                    # Создаем новое
+                    conn = self._create_connection()
+
+                self.last_health_check = now
 
             yield conn
 
