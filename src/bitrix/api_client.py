@@ -303,7 +303,7 @@ class Bitrix24Client:
                 name_match = contact_name == search_name
                 last_name_match = contact_last_name == search_last_name
 
-                # ✅ УЛУЧШЕННАЯ ЛОГИКА: Отчество должно совпадать точно
+                #  УЛУЧШЕННАЯ ЛОГИКА: Отчество должно совпадать точно
                 # Если у одного есть отчество, а у другого нет - это РАЗНЫЕ люди
                 second_name_match = contact_second_name == search_second_name
 
@@ -618,7 +618,7 @@ class Bitrix24Client:
                 'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
                 'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
-                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  # ✅ Комментарий из IDENT
+                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  #  Комментарий из IDENT
 
                 # Дополнительные поля (для внутреннего использования)
                 'UF_CRM_1769072841035': deal_data.get('uf_crm_ident_id'),  # ID из Ident
@@ -678,7 +678,7 @@ class Bitrix24Client:
                 'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
                 'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
                 'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
-                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  # ✅ Комментарий из IDENT
+                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  #  Комментарий из IDENT
                 'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
 
                 # План лечения
@@ -768,7 +768,7 @@ class Bitrix24Client:
     @retry_on_api_error(max_attempts=3)
     def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False) -> Dict[str, Any]:
         """
-        ✅ BATCH ОПТИМИЗАЦИЯ: Выполняет несколько команд за один запрос
+         BATCH ОПТИМИЗАЦИЯ: Выполняет несколько команд за один запрос
 
         Args:
             commands: Словарь {command_name: "method?params"}
@@ -833,7 +833,7 @@ class Bitrix24Client:
     @retry_on_api_error(max_attempts=3)
     def batch_find_contacts_by_phones(self, phones: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
         """
-        ✅ BATCH ОПТИМИЗАЦИЯ: Ищет несколько контактов по телефонам за один запрос
+         BATCH ОПТИМИЗАЦИЯ: Ищет несколько контактов по телефонам за один запрос
 
         Args:
             phones: Список телефонов
@@ -854,7 +854,7 @@ class Bitrix24Client:
         results = self.batch_execute(commands)
 
         # Парсим результаты
-        # ✅ FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
+        #  FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
         contacts = {}
         for phone in phones:
             if phone in results:
@@ -871,7 +871,7 @@ class Bitrix24Client:
     @retry_on_api_error(max_attempts=3)
     def batch_find_deals_by_ident_ids(self, ident_ids: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
         """
-        ✅ BATCH ОПТИМИЗАЦИЯ: Ищет несколько сделок по ID из Ident за один запрос
+         BATCH ОПТИМИЗАЦИЯ: Ищет несколько сделок по ID из Ident за один запрос
 
         Args:
             ident_ids: Список уникальных идентификаторов из Ident
@@ -890,7 +890,7 @@ class Bitrix24Client:
         results = self.batch_execute(commands)
 
         # Парсим результаты
-        # ✅ FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
+        #  FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
         deals = {}
         for ident_id in ident_ids:
             if ident_id in results:
@@ -913,15 +913,15 @@ class Bitrix24Client:
         """
         try:
             result = self._make_request('crm.contact.list', {'filter': {}, 'select': ['ID']})
-            logger.info("✅ Подключение к Битрикс24 успешно")
+            logger.info(" Подключение к Битрикс24 успешно")
             return True
 
         except Bitrix24AuthError as e:
-            logger.error(f"❌ Ошибка аутентификации: {e}")
+            logger.error(f"ERROR: Ошибка аутентификации: {e}")
             raise
 
         except Bitrix24Error as e:
-            logger.error(f"❌ Ошибка подключения: {e}")
+            logger.error(f"ERROR: Ошибка подключения: {e}")
             raise
 
 
@@ -941,21 +941,21 @@ if __name__ == "__main__":
         client = Bitrix24Client(webhook_url)
 
         # Тест 1: Подключение
-        print("\n1️⃣ Тест подключения:")
+        print("\n1. Тест подключения:")
         if client.test_connection():
-            print("✅ Подключение успешно")
+            print(" Подключение успешно")
 
         # Тест 2: Поиск контакта
-        print("\n2️⃣ Тест поиска контакта:")
+        print("\n2. Тест поиска контакта:")
         test_phone = "+79991234567"
         contact = client.find_contact_by_phone(test_phone)
         if contact:
-            print(f"✅ Найден контакт: {contact}")
+            print(f" Найден контакт: {contact}")
         else:
-            print(f"ℹ️ Контакт не найден для {test_phone}")
+            print(f"INFO: Контакт не найден для {test_phone}")
 
         # Тест 3: Создание контакта
-        print("\n3️⃣ Тест создания контакта:")
+        print("\n3. Тест создания контакта:")
         test_contact = {
             'name': 'Тестовый',
             'last_name': 'Контакт',
@@ -966,21 +966,21 @@ if __name__ == "__main__":
 
         # Раскомментируйте для реального создания
         # contact_id = client.create_contact(test_contact)
-        # print(f"✅ Создан контакт ID={contact_id}")
-        print("⏭️  Пропущено (раскомментируйте для реального теста)")
+        # print(f" Создан контакт ID={contact_id}")
+        print("SKIP:  Пропущено (раскомментируйте для реального теста)")
 
-        print("\n✅ Все тесты пройдены!")
+        print("\n Все тесты пройдены!")
 
     except Bitrix24AuthError as e:
-        print(f"\n❌ Ошибка аутентификации: {e}")
+        print(f"\nERROR: Ошибка аутентификации: {e}")
         sys.exit(1)
 
     except Bitrix24Error as e:
-        print(f"\n❌ Ошибка API: {e}")
+        print(f"\nERROR: Ошибка API: {e}")
         sys.exit(1)
 
     except Exception as e:
-        print(f"\n❌ Неожиданная ошибка: {e}")
+        print(f"\nERROR: Неожиданная ошибка: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
