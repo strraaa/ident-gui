@@ -467,11 +467,14 @@ class Bitrix24Client:
                 'crm.lead.update',
                 {
                     'id': lead_id,
-                    'fields': {'STATUS_ID': status_id}
+                    'fields': {
+                        'STATUS_ID': status_id,
+                        'ASSIGNED_BY_ID': 13  # Ответственный за лид
+                    }
                 }
             )
 
-            logger.info(f"Обновлен статус лида ID={lead_id} на {status_id}")
+            logger.info(f"Обновлен статус лида ID={lead_id} на {status_id}, ответственный ID=13")
             return True
 
         except Bitrix24Error as e:
@@ -496,6 +499,7 @@ class Bitrix24Client:
                 'LAST_NAME': contact_data.get('last_name', ''),
                 'SECOND_NAME': contact_data.get('second_name', ''),
                 'TYPE_ID': contact_data.get('type_id', 'CLIENT'),
+                'ASSIGNED_BY_ID': 13,  # Ответственный за контакт
                 'PHONE': [{'VALUE': contact_data['phone'], 'VALUE_TYPE': 'MOBILE'}],
                 'UF_CRM_1769083788971': contact_data.get('UF_CRM_1769083788971', ''),  # Номер карты пациента
                 'UF_CRM_1769087537061': contact_data.get('UF_CRM_1769087537061', '')   # Родитель/Опекун
@@ -602,6 +606,7 @@ class Bitrix24Client:
                 'TITLE': deal_data.get('title', 'Сделка'),
                 'STAGE_ID': deal_data.get('stage_id', 'NEW'),
                 'CONTACT_ID': contact_id,
+                'ASSIGNED_BY_ID': 13,  # Ответственный за сделку
                 'OPPORTUNITY': deal_data.get('opportunity', 0),
                 'CURRENCY_ID': deal_data.get('currency_id', 'RUB'),
 
