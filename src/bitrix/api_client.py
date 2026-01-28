@@ -145,7 +145,8 @@ class Bitrix24Client:
         webhook_url: str,
         request_timeout: int = 30,
         max_retries: int = 3,
-        enable_rate_limiting: bool = True
+        enable_rate_limiting: bool = True,
+        default_assigned_by_id: Optional[int] = None
     ):
         """
         Инициализация клиента
@@ -155,6 +156,7 @@ class Bitrix24Client:
             request_timeout: Таймаут запроса в секундах
             max_retries: Максимальное количество повторных попыток
             enable_rate_limiting: Включить ли rate limiting
+            default_assigned_by_id: ID ответственного по умолчанию (опционально)
         """
         if not webhook_url or not webhook_url.startswith(('http://', 'https://')):
             raise ValueError(f"Невалидный webhook_url: {webhook_url}")
@@ -162,11 +164,15 @@ class Bitrix24Client:
         self.webhook_url = webhook_url.rstrip('/')
         self.request_timeout = request_timeout
         self.max_retries = max_retries
+        self.default_assigned_by_id = default_assigned_by_id
 
         # Rate limiter
         self.rate_limiter = RateLimiter() if enable_rate_limiting else None
 
-        logger.info(f"Bitrix24Client инициализирован: {self.webhook_url[:50]}...")
+        if default_assigned_by_id:
+            logger.info(f"Bitrix24Client инициализирован: {self.webhook_url[:50]}... (ответственный: {default_assigned_by_id})")
+        else:
+            logger.info(f"Bitrix24Client инициализирован: {self.webhook_url[:50]}...")
 
     def _make_request(
         self,
@@ -499,11 +505,14 @@ class Bitrix24Client:
                 'LAST_NAME': contact_data.get('last_name', ''),
                 'SECOND_NAME': contact_data.get('second_name', ''),
                 'TYPE_ID': contact_data.get('type_id', 'CLIENT'),
-                'ASSIGNED_BY_ID': 13,  # Ответственный за контакт
                 'PHONE': [{'VALUE': contact_data['phone'], 'VALUE_TYPE': 'MOBILE'}],
                 'UF_CRM_1769083788971': contact_data.get('UF_CRM_1769083788971', ''),  # Номер карты пациента
                 'UF_CRM_1769087537061': contact_data.get('UF_CRM_1769087537061', '')   # Родитель/Опекун
             }
+
+            # Устанавливаем ответственного если указан в конфиге
+            if self.default_assigned_by_id:
+                fields['ASSIGNED_BY_ID'] = self.default_assigned_by_id
 
             result = self._make_request('crm.contact.add', {'fields': fields})
 
@@ -606,7 +615,6 @@ class Bitrix24Client:
                 'TITLE': deal_data.get('title', 'Сделка'),
                 'STAGE_ID': deal_data.get('stage_id', 'NEW'),
                 'CONTACT_ID': contact_id,
-                'ASSIGNED_BY_ID': 13,  # Ответственный за сделку
                 'OPPORTUNITY': deal_data.get('opportunity', 0),
                 'CURRENCY_ID': deal_data.get('currency_id', 'RUB'),
 
@@ -633,6 +641,10 @@ class Bitrix24Client:
                 'UF_CRM_1769167266723': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
                 'UF_CRM_1769167398642': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
+
+            # Устанавливаем ответственного если указан в конфиге
+            if self.default_assigned_by_id:
+                fields['ASSIGNED_BY_ID'] = self.default_assigned_by_id
 
             # Удаляем None значения
             fields = {k: v for k, v in fields.items() if v is not None}

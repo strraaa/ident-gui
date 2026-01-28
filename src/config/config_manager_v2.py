@@ -359,11 +359,15 @@ class ConfigManager:
 
     def get_bitrix24_config(self) -> Dict[str, Any]:
         """Возвращает конфигурацию Битрикс24 с расшифрованным токеном"""
+        # Читаем ID ответственного (может быть пустым)
+        assigned_by_id = self.config.get('Bitrix24', 'default_assigned_by_id', fallback='').strip()
+
         return {
             'webhook_url': self.config.get('Bitrix24', 'webhook_url'),
             'token': self._get_decrypted('Bitrix24', 'token'),  # Расшифровываем
             'request_timeout': self.config.getint('Bitrix24', 'request_timeout', fallback=30),
             'max_retries': self.config.getint('Bitrix24', 'max_retries', fallback=3),
+            'default_assigned_by_id': int(assigned_by_id) if assigned_by_id else None,
         }
 
     def get_sync_config(self) -> Dict[str, Any]:
