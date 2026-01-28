@@ -491,28 +491,29 @@ class IdentConnector:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    query,
-                    (
-                        batch_size,
-                        last_sync_time, last_sync_time, last_sync_time,
-                        last_sync_time, last_sync_time, last_sync_time
+                try:
+                    cursor.execute(
+                        query,
+                        (
+                            batch_size,
+                            last_sync_time, last_sync_time, last_sync_time,
+                            last_sync_time, last_sync_time, last_sync_time
+                        )
                     )
-                )
 
-                columns = [column[0] for column in cursor.description]
-                results = []
+                    columns = [column[0] for column in cursor.description]
+                    results = []
 
-                # ✅ ОПТИМИЗАЦИЯ: fetchmany вместо fetchall для больших объемов
-                while True:
-                    rows = cursor.fetchmany(100)
-                    if not rows:
-                        break
-                    results.extend(dict(zip(columns, row)) for row in rows)
+                    while True:
+                        rows = cursor.fetchmany(100)
+                        if not rows:
+                            break
+                        results.extend(dict(zip(columns, row)) for row in rows)
 
-                cursor.close()
-                logger.info(f"Извлечено записей: {len(results)}")
-                return results
+                    logger.info(f"Извлечено записей: {len(results)}")
+                    return results
+                finally:
+                    cursor.close()
 
         except pyodbc.Error as e:
             logger.error(f"Ошибка БД при извлечении записей: {e}", exc_info=True)
@@ -662,30 +663,31 @@ class IdentConnector:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    query,
-                    (
-                        batch_size,
-                        last_sync_time, last_sync_time, last_sync_time,
-                        last_sync_time, last_sync_time, last_sync_time
+                try:
+                    cursor.execute(
+                        query,
+                        (
+                            batch_size,
+                            last_sync_time, last_sync_time, last_sync_time,
+                            last_sync_time, last_sync_time, last_sync_time
+                        )
                     )
-                )
 
-                columns = [column[0] for column in cursor.description]
-                total_count = 0
+                    columns = [column[0] for column in cursor.description]
+                    total_count = 0
 
-                # ✅ ГЕНЕРАТОР: Возвращаем записи по мере получения
-                while True:
-                    rows = cursor.fetchmany(fetch_size)
-                    if not rows:
-                        break
+                    while True:
+                        rows = cursor.fetchmany(fetch_size)
+                        if not rows:
+                            break
 
-                    for row in rows:
-                        total_count += 1
-                        yield dict(zip(columns, row))
+                        for row in rows:
+                            total_count += 1
+                            yield dict(zip(columns, row))
 
-                cursor.close()
-                logger.info(f"Извлечено записей (генератор): {total_count}")
+                    logger.info(f"Извлечено записей (генератор): {total_count}")
+                finally:
+                    cursor.close()
 
         except pyodbc.Error as e:
             logger.error(f"Ошибка БД при извлечении записей (генератор): {e}", exc_info=True)

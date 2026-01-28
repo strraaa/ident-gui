@@ -935,7 +935,7 @@ if __name__ == "__main__":
 
     webhook_url = sys.argv[1]
 
-    print("🧪 Тестирование Bitrix24Client...")
+    print("Testing Bitrix24Client...")
 
     try:
         client = Bitrix24Client(webhook_url)
