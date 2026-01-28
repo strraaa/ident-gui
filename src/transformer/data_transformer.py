@@ -391,14 +391,6 @@ class DataTransformer:
         for warning in validation.warnings:
             logger.warning(f"Запись {reception['ReceptionID']}: {warning}")
 
-        # Пропускаем записи без услуг И без суммы (мусорные данные)
-        has_no_services = any("Услуги не указаны" in w for w in validation.warnings)
-        has_no_amount = any("Сумма не указана" in w for w in validation.warnings)
-
-        if has_no_services and has_no_amount:
-            logger.info(f"SKIP: Запись {reception['ReceptionID']} пропущена (нет услуг и суммы)")
-            return None
-
         # Генерация уникального ID
         unique_id = UniqueIdGenerator.generate_reception_id(
             self.filial_id,
