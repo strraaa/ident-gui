@@ -904,6 +904,39 @@ class Bitrix24Client:
 
         return deals
 
+    @retry_on_api_error(max_attempts=3)
+    def batch_find_leads_by_phones(self, phones: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+        """
+        BATCH ОПТИМИЗАЦИЯ: Ищет несколько лидов по телефонам за один запрос
+
+        Args:
+            phones: Список телефонов
+
+        Returns:
+            Словарь {phone: lead_data или None}
+        """
+        if not phones:
+            return {}
+
+        commands = {}
+        for phone in phones[:50]:
+            safe_phone = phone.replace('+', '%2B')
+            commands[phone] = f"crm.lead.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=STATUS_ID"
+
+        results = self.batch_execute(commands)
+
+        leads = {}
+        for phone in phones:
+            if phone in results:
+                lead_list = results[phone] if isinstance(results[phone], list) else []
+                leads[phone] = lead_list[0] if lead_list else None
+            else:
+                leads[phone] = None
+
+        logger.info(f"Batch поиск лидов: запрошено {len(phones)}, найдено {sum(1 for l in leads.values() if l)}")
+
+        return leads
+
     def test_connection(self) -> bool:
         """
         Тестирует подключение к API
