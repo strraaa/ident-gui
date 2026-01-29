@@ -753,7 +753,7 @@ class Bitrix24Client:
         commands = {}
         for phone in phones[:50]:
             safe_phone = phone.replace('+', '%2B')
-            commands[phone] = f"crm.lead.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=STATUS_ID"
+            commands[phone] = f"crm.lead.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=STATUS_ID&select[]=CONTACT_ID"
 
         results = self.batch_execute(commands)
 
