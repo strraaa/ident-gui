@@ -367,6 +367,47 @@ class Bitrix24Client:
             raise
 
     @retry_on_api_error(max_attempts=3)
+    def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
+        """
+        Ищет контакт ТОЛЬКО по телефону (упрощенный поиск)
+
+        Возвращает первый найденный контакт.
+        Используется когда не важно совпадение ФИО (дубли сделок допустимы).
+
+        Args:
+            phone: Номер телефона (нормализованный)
+
+        Returns:
+            Первый найденный контакт или None
+        """
+        try:
+            result = self._make_request(
+                'crm.contact.list',
+                {
+                    'filter': {'PHONE': phone},
+                    'select': ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE'],
+                    'order': {'DATE_CREATE': 'ASC'}  # Берем самый старый (первый созданный)
+                }
+            )
+
+            contacts = result.get('result', [])
+
+            if contacts:
+                contact = contacts[0]
+                logger.info(
+                    f"Найден контакт ID={contact['ID']} для телефона {phone} "
+                    f"({contact.get('LAST_NAME', '')} {contact.get('NAME', '')})"
+                )
+                return contact
+
+            logger.info(f"Контакт не найден для телефона {phone}")
+            return None
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка поиска контакта: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
     def find_all_contacts_by_phone(self, phone: str) -> List[Dict[str, Any]]:
         """
         Ищет ВСЕ контакты по телефону (для работы с семьями)
@@ -521,6 +562,50 @@ class Bitrix24Client:
 
         except Bitrix24Error as e:
             logger.error(f"Ошибка обновления статуса лида {lead_id}: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
+    def convert_lead(self, lead_id: int, contact_id: Optional[int] = None) -> Optional[int]:
+        """
+        Конвертирует лид в сделку
+
+        Args:
+            lead_id: ID лида для конвертации
+            contact_id: ID контакта (опционально, если None - будет создан из лида)
+
+        Returns:
+            ID созданной сделки или None при ошибке
+        """
+        try:
+            # Параметры конвертации
+            params = {
+                'LEAD_ID': lead_id,
+                'CREATE_CONTACT': 'N' if contact_id else 'Y',  # Не создавать контакт если уже есть
+                'CREATE_COMPANY': 'N',  # Не создавать компанию
+                'CREATE_DEAL': 'Y'       # Создать сделку
+            }
+
+            # Если есть контакт - привязываем к нему
+            if contact_id:
+                params['CONTACT_ID'] = contact_id
+
+            result = self._make_request('crm.lead.convert', params)
+
+            # Получаем ID созданной сделки
+            deal_id = result.get('result', {}).get('DEAL_ID')
+
+            if deal_id:
+                logger.info(
+                    f"КОНВЕРТАЦИЯ: Лид {lead_id} → Сделка {deal_id} "
+                    f"(контакт: {contact_id or 'создан новый'})"
+                )
+                return int(deal_id)
+            else:
+                logger.warning(f"Конвертация лида {lead_id} не вернула ID сделки")
+                return None
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка конвертации лида {lead_id}: {e}")
             raise
 
     @retry_on_api_error(max_attempts=3)
