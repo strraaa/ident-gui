@@ -367,6 +367,39 @@ class Bitrix24Client:
             raise
 
     @retry_on_api_error(max_attempts=3)
+    def find_all_contacts_by_phone(self, phone: str) -> List[Dict[str, Any]]:
+        """
+        Ищет ВСЕ контакты по телефону (для работы с семьями)
+
+        Args:
+            phone: Номер телефона (нормализованный)
+
+        Returns:
+            Список контактов (может быть пустым)
+        """
+        try:
+            result = self._make_request(
+                'crm.contact.list',
+                {
+                    'filter': {'PHONE': phone},
+                    'select': ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE', 'DATE_CREATE']
+                }
+            )
+
+            contacts = result.get('result', [])
+
+            if contacts:
+                logger.info(f"Найдено {len(contacts)} контактов с телефоном {phone}")
+            else:
+                logger.info(f"Контакты не найдены для телефона {phone}")
+
+            return contacts
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка поиска контактов: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
     def find_lead_by_phone_and_name(
         self,
         phone: str,
@@ -469,18 +502,21 @@ class Bitrix24Client:
             True если обновлено успешно
         """
         try:
+            fields = {'STATUS_ID': status_id}
+
+            # Устанавливаем ответственного если указан в конфиге
+            if self.default_assigned_by_id:
+                fields['ASSIGNED_BY_ID'] = self.default_assigned_by_id
+
             result = self._make_request(
                 'crm.lead.update',
                 {
                     'id': lead_id,
-                    'fields': {
-                        'STATUS_ID': status_id,
-                        'ASSIGNED_BY_ID': 13  # Ответственный за лид
-                    }
+                    'fields': fields
                 }
             )
 
-            logger.info(f"Обновлен статус лида ID={lead_id} на {status_id}, ответственный ID=13")
+            logger.info(f"Обновлен статус лида ID={lead_id} на {status_id}")
             return True
 
         except Bitrix24Error as e:
@@ -559,6 +595,63 @@ class Bitrix24Client:
 
         except Bitrix24Error as e:
             logger.error(f"Ошибка поиска сделки: {e}")
+            raise
+
+    @retry_on_api_error(max_attempts=3)
+    def find_deals_by_contact_without_ident_id(
+        self,
+        contact_id: int,
+        exclude_final: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Ищет сделки контакта БЕЗ IDENT ID (для привязки существующих сделок)
+
+        Args:
+            contact_id: ID контакта
+            exclude_final: Исключить финальные стадии (WON/LOSE)
+
+        Returns:
+            Список сделок (отсортированы по дате создания, сначала новые)
+        """
+        try:
+            # Импортируем StageMapper для проверки финальных стадий
+            from src.transformer.data_transformer import StageMapper
+
+            result = self._make_request(
+                'crm.deal.list',
+                {
+                    'filter': {
+                        'CONTACT_ID': contact_id,
+                        '=UF_CRM_1769072841035': False  # Без IDENT ID (пустое поле)
+                    },
+                    'select': ['ID', 'STAGE_ID', 'DATE_CREATE', 'TITLE', 'UF_CRM_1769072841035'],
+                    'order': {'DATE_CREATE': 'DESC'}  # Сначала новые
+                }
+            )
+
+            deals = result.get('result', [])
+
+            if exclude_final:
+                # Фильтруем финальные стадии
+                filtered_deals = []
+                for deal in deals:
+                    stage = deal.get('STAGE_ID')
+                    if not StageMapper.is_stage_final(stage):
+                        filtered_deals.append(deal)
+                deals = filtered_deals
+
+            if deals:
+                logger.info(
+                    f"Найдено {len(deals)} сделок без IDENT ID для контакта {contact_id} "
+                    f"(exclude_final={exclude_final})"
+                )
+            else:
+                logger.debug(f"Сделки без IDENT ID не найдены для контакта {contact_id}")
+
+            return deals
+
+        except Bitrix24Error as e:
+            logger.error(f"Ошибка поиска сделок: {e}")
             raise
 
     @retry_on_api_error(max_attempts=3)
