@@ -1045,7 +1045,6 @@ class IdentConnector:
 
         WHERE
             pat.CardNumber = ?
-            AND tp.IsActive = 1
 
         ORDER BY
             tp.DateTimeCreated DESC,
