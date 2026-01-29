@@ -253,434 +253,105 @@ class Bitrix24Client:
             raise Bitrix24Error(f"Ошибка HTTP запроса: {e}")
 
     @retry_on_api_error(max_attempts=3)
-    def find_contact_by_phone_and_name(
-        self,
-        phone: str,
-        name: str,
-        last_name: str,
-        second_name: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Ищет контакт по телефону И ФИО
-
-        Это необходимо, т.к. по одному телефону может быть несколько людей
-        (например, члены семьи используют один номер)
-
-        Args:
-            phone: Номер телефона (нормализованный)
-            name: Имя
-            last_name: Фамилия
-            second_name: Отчество (опционально)
-
-        Returns:
-            Данные контакта или None если не найден
-        """
-        try:
-            result = self._make_request(
-                'crm.contact.list',
-                {
-                    'filter': {'PHONE': phone},
-                    'select': ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE']
-                }
-            )
-
-            contacts = result.get('result', [])
-
-            if not contacts:
-                logger.info(f"Контакты не найдены для телефона {phone}")
-                return None
-
-            # Ищем контакт с совпадающим ФИО
-            for contact in contacts:
-                contact_name = (contact.get('NAME') or '').strip().lower()
-                contact_last_name = (contact.get('LAST_NAME') or '').strip().lower()
-                contact_second_name = (contact.get('SECOND_NAME') or '').strip().lower()
-
-                # Нормализуем входные данные
-                search_name = name.strip().lower() if name else ''
-                search_last_name = last_name.strip().lower() if last_name else ''
-                search_second_name = second_name.strip().lower() if second_name else ''
-
-                # Пропускаем пустые имена/фамилии
-                if not search_name or not search_last_name:
-                    continue
-
-                # Сравниваем ФИО (без учета регистра)
-                name_match = contact_name == search_name
-                last_name_match = contact_last_name == search_last_name
-
-                #  УЛУЧШЕННАЯ ЛОГИКА: Отчество должно совпадать точно
-                # Если у одного есть отчество, а у другого нет - это РАЗНЫЕ люди
-                second_name_match = contact_second_name == search_second_name
-
-                if name_match and last_name_match and second_name_match:
-                    # Маскируем телефон для логов
-                    masked_phone = f"+7XXX***{phone[-4:]}" if len(phone) > 4 else "***"
-                    logger.info(
-                        f"Найден контакт ID={contact['ID']} для {search_last_name} {search_name} "
-                        f"{search_second_name or ''} (тел: {masked_phone})"
-                    )
-                    return contact
-
-            logger.info(
-                f"Контакт с ФИО '{last_name} {name} {second_name or ''}' "
-                f"не найден для телефона {phone} (найдено контактов: {len(contacts)})"
-            )
-            return None
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска контакта: {e}")
-            raise
-
-    @retry_on_api_error(max_attempts=3)
     def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
-        """
-        Ищет контакт по телефону
+        """Ищет первый контакт по телефону"""
+        result = self._make_request(
+            'crm.contact.list',
+            {
+                'filter': {'PHONE': phone},
+                'select': ['ID', 'NAME', 'LAST_NAME', 'PHONE'],
+                'order': {'DATE_CREATE': 'ASC'}
+            }
+        )
 
-        Args:
-            phone: Номер телефона (нормализованный)
+        contacts = result.get('result', [])
 
-        Returns:
-            Данные контакта или None если не найден
-        """
-        try:
-            result = self._make_request(
-                'crm.contact.list',
-                {
-                    'filter': {'PHONE': phone},
-                    'select': ['ID', 'NAME', 'LAST_NAME', 'PHONE']
-                }
-            )
-
-            contacts = result.get('result', [])
-
-            if contacts:
-                contact = contacts[0]  # Берем первый найденный
-                logger.info(f"Найден контакт ID={contact['ID']} для телефона {phone}")
-                return contact
-
-            logger.info(f"Контакт не найден для телефона {phone}")
-            return None
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска контакта: {e}")
-            raise
-
-    @retry_on_api_error(max_attempts=3)
-    def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
-        """
-        Ищет контакт ТОЛЬКО по телефону (упрощенный поиск)
-
-        Возвращает первый найденный контакт.
-        Используется когда не важно совпадение ФИО (дубли сделок допустимы).
-
-        Args:
-            phone: Номер телефона (нормализованный)
-
-        Returns:
-            Первый найденный контакт или None
-        """
-        try:
-            result = self._make_request(
-                'crm.contact.list',
-                {
-                    'filter': {'PHONE': phone},
-                    'select': ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE'],
-                    'order': {'DATE_CREATE': 'ASC'}  # Берем самый старый (первый созданный)
-                }
-            )
-
-            contacts = result.get('result', [])
-
-            if contacts:
-                contact = contacts[0]
-                logger.info(
-                    f"Найден контакт ID={contact['ID']} для телефона {phone} "
-                    f"({contact.get('LAST_NAME', '')} {contact.get('NAME', '')})"
-                )
-                return contact
-
-            logger.info(f"Контакт не найден для телефона {phone}")
-            return None
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска контакта: {e}")
-            raise
-
-    @retry_on_api_error(max_attempts=3)
-    def find_all_contacts_by_phone(self, phone: str) -> List[Dict[str, Any]]:
-        """
-        Ищет ВСЕ контакты по телефону (для работы с семьями)
-
-        Args:
-            phone: Номер телефона (нормализованный)
-
-        Returns:
-            Список контактов (может быть пустым)
-        """
-        try:
-            result = self._make_request(
-                'crm.contact.list',
-                {
-                    'filter': {'PHONE': phone},
-                    'select': ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'PHONE', 'DATE_CREATE']
-                }
-            )
-
-            contacts = result.get('result', [])
-
-            if contacts:
-                logger.info(f"Найдено {len(contacts)} контактов с телефоном {phone}")
-            else:
-                logger.info(f"Контакты не найдены для телефона {phone}")
-
-            return contacts
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска контактов: {e}")
-            raise
-
-    @retry_on_api_error(max_attempts=3)
-    def find_lead_by_phone_and_name(
-        self,
-        phone: str,
-        name: str,
-        last_name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Ищет лид по телефону И ФИО
-
-        Args:
-            phone: Номер телефона
-            name: Имя
-            last_name: Фамилия
-
-        Returns:
-            Данные лида или None
-        """
-        try:
-            result = self._make_request(
-                'crm.lead.list',
-                {
-                    'filter': {'PHONE': phone},
-                    'select': ['ID', 'NAME', 'LAST_NAME', 'STATUS_ID']
-                }
-            )
-
-            leads = result.get('result', [])
-
-            if not leads:
-                return None
-
-            # Ищем лид с совпадающим ФИО
-            for lead in leads:
-                lead_name = (lead.get('NAME') or '').strip().lower()
-                lead_last_name = (lead.get('LAST_NAME') or '').strip().lower()
-
-                # Сравниваем ФИО (без учета регистра)
-                name_match = lead_name == name.strip().lower()
-                last_name_match = lead_last_name == last_name.strip().lower()
-
-                if name_match and last_name_match:
-                    logger.info(
-                        f"Найден лид ID={lead['ID']} для {last_name} {name} "
-                        f"(тел: {phone[:10]}...)"
-                    )
-                    return lead
-
+        if contacts:
+            contact = contacts[0]
             logger.info(
-                f"Лид с ФИО '{last_name} {name}' не найден для телефона {phone}"
+                f"Найден контакт {contact['ID']} "
+                f"({contact.get('LAST_NAME', '')} {contact.get('NAME', '')})"
             )
-            return None
+            return contact
 
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска лида: {e}")
-            raise
+        return None
 
     @retry_on_api_error(max_attempts=3)
     def find_lead_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
-        """
-        Ищет лид по телефону
+        """Ищет первый лид по телефону"""
+        result = self._make_request(
+            'crm.lead.list',
+            {
+                'filter': {'PHONE': phone},
+                'select': ['ID', 'STATUS_ID', 'CONTACT_ID']
+            }
+        )
 
-        Args:
-            phone: Номер телефона
-
-        Returns:
-            Данные лида или None
-        """
-        try:
-            result = self._make_request(
-                'crm.lead.list',
-                {
-                    'filter': {'PHONE': phone},
-                    'select': ['ID', 'NAME', 'LAST_NAME', 'STATUS_ID']
-                }
-            )
-
-            leads = result.get('result', [])
-
-            if leads:
-                lead = leads[0]
-                logger.info(f"Найден лид ID={lead['ID']} для телефона {phone}")
-                return lead
-
-            return None
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска лида: {e}")
-            raise
-
-    @retry_on_api_error(max_attempts=3)
-    def update_lead_status(self, lead_id: int, status_id: str = 'CONVERTED') -> bool:
-        """
-        Обновляет статус лида (например, переводит в успешную стадию)
-
-        Args:
-            lead_id: ID лида
-            status_id: Новый статус (по умолчанию CONVERTED - успешно обработан)
-
-        Returns:
-            True если обновлено успешно
-        """
-        try:
-            fields = {'STATUS_ID': status_id}
-
-            # Устанавливаем ответственного если указан в конфиге
-            if self.default_assigned_by_id:
-                fields['ASSIGNED_BY_ID'] = self.default_assigned_by_id
-
-            result = self._make_request(
-                'crm.lead.update',
-                {
-                    'id': lead_id,
-                    'fields': fields
-                }
-            )
-
-            logger.info(f"Обновлен статус лида ID={lead_id} на {status_id}")
-            return True
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка обновления статуса лида {lead_id}: {e}")
-            raise
+        leads = result.get('result', [])
+        return leads[0] if leads else None
 
     @retry_on_api_error(max_attempts=3)
     def convert_lead(self, lead_id: int, contact_id: Optional[int] = None) -> Optional[int]:
-        """
-        Конвертирует лид в сделку
+        """Конвертирует лид в сделку"""
+        params = {
+            'LEAD_ID': lead_id,
+            'CREATE_CONTACT': 'N' if contact_id else 'Y',
+            'CREATE_COMPANY': 'N',
+            'CREATE_DEAL': 'Y'
+        }
 
-        Args:
-            lead_id: ID лида для конвертации
-            contact_id: ID контакта (опционально, если None - будет создан из лида)
+        if contact_id:
+            params['CONTACT_ID'] = contact_id
 
-        Returns:
-            ID созданной сделки или None при ошибке
-        """
-        try:
-            # Параметры конвертации
-            params = {
-                'LEAD_ID': lead_id,
-                'CREATE_CONTACT': 'N' if contact_id else 'Y',  # Не создавать контакт если уже есть
-                'CREATE_COMPANY': 'N',  # Не создавать компанию
-                'CREATE_DEAL': 'Y'       # Создать сделку
-            }
+        result = self._make_request('crm.lead.convert', params)
+        deal_id = result.get('result', {}).get('DEAL_ID')
 
-            # Если есть контакт - привязываем к нему
-            if contact_id:
-                params['CONTACT_ID'] = contact_id
+        if deal_id:
+            logger.info(f"Лид {lead_id} конвертирован в сделку {deal_id}")
+            return int(deal_id)
 
-            result = self._make_request('crm.lead.convert', params)
-
-            # Получаем ID созданной сделки
-            deal_id = result.get('result', {}).get('DEAL_ID')
-
-            if deal_id:
-                logger.info(
-                    f"КОНВЕРТАЦИЯ: Лид {lead_id} → Сделка {deal_id} "
-                    f"(контакт: {contact_id or 'создан новый'})"
-                )
-                return int(deal_id)
-            else:
-                logger.warning(f"Конвертация лида {lead_id} не вернула ID сделки")
-                return None
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка конвертации лида {lead_id}: {e}")
-            raise
+        logger.warning(f"Конвертация лида {lead_id} не вернула ID сделки")
+        return None
 
     @retry_on_api_error(max_attempts=3)
     def create_contact(self, contact_data: Dict[str, Any]) -> int:
-        """
-        Создает новый контакт
+        """Создает новый контакт"""
+        fields = {
+            'NAME': contact_data.get('name', ''),
+            'LAST_NAME': contact_data.get('last_name', ''),
+            'SECOND_NAME': contact_data.get('second_name', ''),
+            'TYPE_ID': contact_data.get('type_id', 'CLIENT'),
+            'PHONE': [{'VALUE': contact_data['phone'], 'VALUE_TYPE': 'MOBILE'}],
+            'UF_CRM_1769083788971': contact_data.get('UF_CRM_1769083788971', ''),
+            'UF_CRM_1769087537061': contact_data.get('UF_CRM_1769087537061', '')
+        }
 
-        Args:
-            contact_data: Данные контакта
+        if self.default_assigned_by_id:
+            fields['ASSIGNED_BY_ID'] = self.default_assigned_by_id
 
-        Returns:
-            ID созданного контакта
-        """
-        try:
-            # Формируем поля для API
-            fields = {
-                'NAME': contact_data.get('name', ''),
-                'LAST_NAME': contact_data.get('last_name', ''),
-                'SECOND_NAME': contact_data.get('second_name', ''),
-                'TYPE_ID': contact_data.get('type_id', 'CLIENT'),
-                'PHONE': [{'VALUE': contact_data['phone'], 'VALUE_TYPE': 'MOBILE'}],
-                'UF_CRM_1769083788971': contact_data.get('UF_CRM_1769083788971', ''),  # Номер карты пациента
-                'UF_CRM_1769087537061': contact_data.get('UF_CRM_1769087537061', '')   # Родитель/Опекун
-            }
+        result = self._make_request('crm.contact.add', {'fields': fields})
+        contact_id = result.get('result')
 
-            # Устанавливаем ответственного если указан в конфиге
-            if self.default_assigned_by_id:
-                fields['ASSIGNED_BY_ID'] = self.default_assigned_by_id
+        logger.info(
+            f"Создан контакт {contact_id}: "
+            f"{fields['LAST_NAME']} {fields['NAME']}"
+        )
 
-            result = self._make_request('crm.contact.add', {'fields': fields})
-
-            contact_id = result.get('result')
-            logger.info(
-                f"Создан контакт ID={contact_id}: "
-                f"{fields['LAST_NAME']} {fields['NAME']}, тел. {contact_data['phone']}"
-            )
-
-            return int(contact_id)
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка создания контакта: {e}")
-            raise
+        return int(contact_id)
 
     @retry_on_api_error(max_attempts=3)
     def find_deal_by_ident_id(self, ident_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Ищет сделку по ID из Ident
+        """Ищет сделку по IDENT ID"""
+        result = self._make_request(
+            'crm.deal.list',
+            {
+                'filter': {'UF_CRM_1769072841035': ident_id},
+                'select': ['ID', 'STAGE_ID', 'CONTACT_ID', 'UF_CRM_1769072841035']
+            }
+        )
 
-        Args:
-            ident_id: Уникальный идентификатор (F1_12345)
-
-        Returns:
-            Данные сделки или None
-        """
-        try:
-            result = self._make_request(
-                'crm.deal.list',
-                {
-                    'filter': {'UF_CRM_1769072841035': ident_id},  # ID из Ident
-                    'select': ['ID', 'STAGE_ID', 'OPPORTUNITY', 'UF_CRM_1769072841035']
-                }
-            )
-
-            deals = result.get('result', [])
-
-            if deals:
-                deal = deals[0]
-                logger.info(f"Найдена сделка ID={deal['ID']} для {ident_id}")
-                return deal
-
-            return None
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска сделки: {e}")
-            raise
+        deals = result.get('result', [])
+        return deals[0] if deals else None
 
     @retry_on_api_error(max_attempts=3)
     def find_deals_by_contact_without_ident_id(
@@ -688,56 +359,27 @@ class Bitrix24Client:
         contact_id: int,
         exclude_final: bool = True
     ) -> List[Dict[str, Any]]:
-        """
-        Ищет сделки контакта БЕЗ IDENT ID (для привязки существующих сделок)
+        """Ищет сделки контакта без IDENT ID"""
+        from src.transformer.data_transformer import StageMapper
 
-        Args:
-            contact_id: ID контакта
-            exclude_final: Исключить финальные стадии (WON/LOSE)
+        result = self._make_request(
+            'crm.deal.list',
+            {
+                'filter': {
+                    'CONTACT_ID': contact_id,
+                    '=UF_CRM_1769072841035': False
+                },
+                'select': ['ID', 'STAGE_ID', 'DATE_CREATE', 'UF_CRM_1769072841035'],
+                'order': {'DATE_CREATE': 'DESC'}
+            }
+        )
 
-        Returns:
-            Список сделок (отсортированы по дате создания, сначала новые)
-        """
-        try:
-            # Импортируем StageMapper для проверки финальных стадий
-            from src.transformer.data_transformer import StageMapper
+        deals = result.get('result', [])
 
-            result = self._make_request(
-                'crm.deal.list',
-                {
-                    'filter': {
-                        'CONTACT_ID': contact_id,
-                        '=UF_CRM_1769072841035': False  # Без IDENT ID (пустое поле)
-                    },
-                    'select': ['ID', 'STAGE_ID', 'DATE_CREATE', 'TITLE', 'UF_CRM_1769072841035'],
-                    'order': {'DATE_CREATE': 'DESC'}  # Сначала новые
-                }
-            )
+        if exclude_final:
+            deals = [d for d in deals if not StageMapper.is_stage_final(d.get('STAGE_ID'))]
 
-            deals = result.get('result', [])
-
-            if exclude_final:
-                # Фильтруем финальные стадии
-                filtered_deals = []
-                for deal in deals:
-                    stage = deal.get('STAGE_ID')
-                    if not StageMapper.is_stage_final(stage):
-                        filtered_deals.append(deal)
-                deals = filtered_deals
-
-            if deals:
-                logger.info(
-                    f"Найдено {len(deals)} сделок без IDENT ID для контакта {contact_id} "
-                    f"(exclude_final={exclude_final})"
-                )
-            else:
-                logger.debug(f"Сделки без IDENT ID не найдены для контакта {contact_id}")
-
-            return deals
-
-        except Bitrix24Error as e:
-            logger.error(f"Ошибка поиска сделок: {e}")
-            raise
+        return deals
 
     @retry_on_api_error(max_attempts=3)
     def get_deal_treatment_plan_data(self, deal_id: int) -> Optional[Dict[str, str]]:
