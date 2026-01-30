@@ -444,7 +444,7 @@ class DataTransformer:
                 'UF_CRM_1769009157': reception.get('Status', 'Запланирован'),  # Статус записи
                 'UF_CRM_1769083581481': reception.get('CardNumber', ''),  # Номер карты пациента
                 'UF_CRM_1769087458477': reception.get('ParentFullName', ''),  # Родитель/Опекун
-                'UF_CRM_1769494714842': reception.get('Comment', ''),  # ✅ Комментарий из IDENT
+                'UF_CRM_1769494714842': reception.get('Comment', ''),  # Комментарий из IDENT
 
                 # Дополнительная информация (в комментарии)
                 'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)

@@ -409,41 +409,6 @@ class Bitrix24Client:
         return deals
 
     @retry_on_api_error(max_attempts=3)
-    def get_deal_treatment_plan_data(self, deal_id: int) -> Optional[Dict[str, str]]:
-        """
-        Получает данные плана лечения из сделки
-
-        Args:
-            deal_id: ID сделки
-
-        Returns:
-            Словарь с plan (JSON) и hash или None
-        """
-        try:
-            result = self._make_request(
-                'crm.deal.get',
-                {
-                    'id': deal_id
-                }
-            )
-
-            deal = result.get('result', {})
-
-            plan_json = deal.get('UF_CRM_1769167266723', '')
-            plan_hash = deal.get('UF_CRM_1769167398642', '')
-
-            if plan_json or plan_hash:
-                return {
-                    'plan': plan_json,
-                    'hash': plan_hash
-                }
-
-            return None
-
-        except Bitrix24Error as e:
-            logger.warning(f"Ошибка получения данных плана для сделки {deal_id}: {e}")
-            return None
-
     @retry_on_api_error(max_attempts=3)
     def create_deal(self, deal_data: Dict[str, Any], contact_id: int) -> int:
         """
@@ -564,69 +529,6 @@ class Bitrix24Client:
             raise
 
     @retry_on_api_error(max_attempts=3)
-    def add_comment_to_deal(self, deal_id: int, comment_text: str) -> bool:
-        """
-        Добавляет комментарий к сделке через Timeline API
-
-        Args:
-            deal_id: ID сделки
-            comment_text: Текст комментария
-
-        Returns:
-            True если комментарий добавлен успешно
-        """
-        try:
-            if not comment_text:
-                return True
-
-            # Используем crm.timeline.comment.add с правильной структурой
-            result = self._make_request(
-                'crm.timeline.comment.add',
-                {
-                    'fields': {
-                        'ENTITY_ID': deal_id,
-                        'ENTITY_TYPE': 'deal',
-                        'COMMENT': comment_text,
-                        'AUTHOR_ID': 1  # ID пользователя (1 - администратор)
-                    }
-                }
-            )
-
-            comment_id = result.get('result')
-            logger.info(f"Добавлен комментарий ID={comment_id} к сделке ID={deal_id}")
-            return True
-
-        except Bitrix24Error as e:
-            logger.warning(f"Ошибка Timeline API для сделки {deal_id}: {e}")
-            # Пробуем альтернативный метод через активность
-            try:
-                result = self._make_request(
-                    'crm.activity.add',
-                    {
-                        'fields': {
-                            'OWNER_TYPE_ID': 2,  # 2 = Deal (сделка)
-                            'OWNER_ID': deal_id,
-                            'PROVIDER_ID': 'CRM_TIMELINE',
-                            'PROVIDER_TYPE_ID': 'COMMENT',
-                            'SUBJECT': 'Комментарий из IDENT',
-                            'DESCRIPTION': comment_text,
-                            'DESCRIPTION_TYPE': 1,  # 1 = Plain text
-                            'COMPLETED': 'Y',
-                            'PRIORITY': 2,  # 2 = Medium
-                            'RESPONSIBLE_ID': 1
-                        }
-                    }
-                )
-
-                activity_id = result.get('result')
-                logger.info(f"Добавлена активность ID={activity_id} к сделке ID={deal_id}")
-                return True
-
-            except Bitrix24Error as e2:
-                logger.error(f"Ошибка добавления комментария к сделке {deal_id}: Timeline={e}, Activity={e2}")
-                # Не падаем, если комментарий не добавился
-                return False
-
     @retry_on_api_error(max_attempts=3)
     def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False) -> Dict[str, Any]:
         """
