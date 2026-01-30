@@ -278,18 +278,37 @@ class Bitrix24Client:
 
     @retry_on_api_error(max_attempts=3)
     def find_lead_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
-        """Ищет первый лид по телефону"""
+        """
+        Ищет первый лид по телефону
+
+        ВАЖНО: filter[PHONE] для лидов НЕ РАБОТАЕТ если телефон в контакте!
+        Поэтому ищем через контакт: phone → CONTACT_ID → lead
+        """
         logger.debug(f"Поиск лида по телефону: {phone}")
+
+        # Сначала ищем контакт
+        contact = self.find_contact_by_phone(phone)
+        if not contact:
+            logger.debug(f"Контакт не найден для {phone}")
+            return None
+
+        contact_id = contact.get('ID')
+        if not contact_id:
+            logger.debug(f"У контакта нет ID для {phone}")
+            return None
+
+        # Ищем лид по CONTACT_ID
+        logger.debug(f"Найден контакт {contact_id}, ищем лид...")
         result = self._make_request(
             'crm.lead.list',
             {
-                'filter': {'PHONE': phone},
+                'filter': {'CONTACT_ID': contact_id},
                 'select': ['ID', 'STATUS_ID', 'CONTACT_ID']
             }
         )
 
         leads = result.get('result', [])
-        logger.debug(f"Найдено лидов для {phone}: {len(leads)}")
+        logger.debug(f"Найдено лидов для контакта {contact_id}: {len(leads)}")
         return leads[0] if leads else None
 
     @retry_on_api_error(max_attempts=3)
@@ -748,13 +767,59 @@ class Bitrix24Client:
         return deals
 
     @retry_on_api_error(max_attempts=3)
-    def batch_find_leads_by_phones(self, phones: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+    def batch_find_leads_by_contact_ids(self, contact_ids: List[int]) -> Dict[int, Optional[Dict[str, Any]]]:
         """
-        BATCH ОПТИМИЗАЦИЯ: Ищет несколько лидов по телефонам за один запрос
-        Аналогично batch_find_contacts_by_phones
+        BATCH ОПТИМИЗАЦИЯ: Ищет лиды по CONTACT_ID
+
+        Args:
+            contact_ids: Список ID контактов
+
+        Returns:
+            Словарь {contact_id: lead_data или None}
+        """
+        if not contact_ids:
+            return {}
+
+        # Формируем batch команды (максимум 50 за раз)
+        commands = {}
+        for contact_id in contact_ids[:50]:
+            commands[str(contact_id)] = f"crm.lead.list?filter[CONTACT_ID]={contact_id}&select[]=ID&select[]=STATUS_ID&select[]=CONTACT_ID"
+
+        logger.debug(f"Batch поиск лидов по CONTACT_ID: {len(commands)} контактов")
+
+        results = self.batch_execute(commands)
+
+        # Парсим результаты
+        leads = {}
+        for contact_id in contact_ids:
+            key = str(contact_id)
+            if key in results:
+                lead_list = results[key] if isinstance(results[key], list) else []
+                found_lead = lead_list[0] if lead_list else None
+                leads[contact_id] = found_lead
+
+                if found_lead:
+                    logger.debug(f"Найден лид {found_lead.get('ID')} для контакта {contact_id}")
+            else:
+                leads[contact_id] = None
+
+        logger.info(f"Batch поиск лидов по CONTACT_ID: запрошено {len(contact_ids)}, найдено {sum(1 for l in leads.values() if l)}")
+
+        return leads
+
+    @retry_on_api_error(max_attempts=3)
+    def batch_find_leads_by_phones(self, phones: List[str], contacts_map: Optional[Dict[str, Optional[Dict[str, Any]]]] = None) -> Dict[str, Optional[Dict[str, Any]]]:
+        """
+        BATCH ОПТИМИЗАЦИЯ: Ищет несколько лидов по телефонам
+
+        ВАЖНО: filter[PHONE] для лидов НЕ РАБОТАЕТ если телефон в контакте!
+        Поэтому используем двухэтапный поиск:
+        1. Находим контакты по телефонам (если не переданы)
+        2. Ищем лиды по CONTACT_ID из найденных контактов
 
         Args:
             phones: Список телефонов
+            contacts_map: Опциональный словарь уже найденных контактов {phone: contact_data}
 
         Returns:
             Словарь {phone: lead_data или None}
@@ -762,38 +827,40 @@ class Bitrix24Client:
         if not phones:
             return {}
 
-        # Формируем batch команды (максимум 50 за раз)
-        commands = {}
-        for phone in phones[:50]:
-            # Экранируем специальные символы в телефоне для использования в query string
-            safe_phone = phone.replace('+', '%2B')
-            commands[phone] = f"crm.lead.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=STATUS_ID&select[]=CONTACT_ID"
+        # Если контакты не переданы - находим сами
+        if contacts_map is None:
+            logger.debug("Контакты не переданы, ищем самостоятельно")
+            contacts_map = self.batch_find_contacts_by_phones(phones)
 
-        logger.debug(f"Batch поиск лидов - команды для {len(commands)} телефонов")
-        logger.debug(f"Пример команды: {list(commands.values())[0] if commands else 'N/A'}")
+        # Собираем CONTACT_ID из найденных контактов
+        phone_to_contact_id = {}
+        contact_ids = []
 
-        results = self.batch_execute(commands)
+        for phone in phones:
+            contact = contacts_map.get(phone)
+            if contact and contact.get('ID'):
+                contact_id = int(contact['ID'])
+                phone_to_contact_id[phone] = contact_id
+                contact_ids.append(contact_id)
+            else:
+                phone_to_contact_id[phone] = None
 
-        logger.debug(f"Batch поиск лидов - получено результатов: {len(results)}")
-        for phone, result in list(results.items())[:3]:  # Логируем первые 3 для примера
-            logger.debug(f"  Телефон {phone}: {type(result).__name__} = {result if not isinstance(result, list) or len(result) < 3 else f'[{len(result)} элементов]'}")
+        logger.debug(f"Из {len(phones)} телефонов найдено {len(contact_ids)} контактов с ID")
 
-        # Парсим результаты (аналогично контактам)
+        # Ищем лиды по CONTACT_ID
+        if contact_ids:
+            leads_by_contact_id = self.batch_find_leads_by_contact_ids(contact_ids)
+        else:
+            leads_by_contact_id = {}
+
+        # Формируем результат: {phone: lead_data}
         leads = {}
         for phone in phones:
-            if phone in results:
-                # Результат уже является списком лидов
-                lead_list = results[phone] if isinstance(results[phone], list) else []
-                found_lead = lead_list[0] if lead_list else None
-                leads[phone] = found_lead
-
-                if found_lead:
-                    logger.debug(f"Найден лид {found_lead.get('ID')} для телефона {phone}, CONTACT_ID={found_lead.get('CONTACT_ID')}")
-                else:
-                    logger.debug(f"Лид не найден для телефона {phone} (пустой список)")
+            contact_id = phone_to_contact_id.get(phone)
+            if contact_id:
+                leads[phone] = leads_by_contact_id.get(contact_id)
             else:
                 leads[phone] = None
-                logger.debug(f"Телефон {phone} отсутствует в результатах batch")
 
         logger.info(f"Batch поиск лидов: запрошено {len(phones)}, найдено {sum(1 for l in leads.values() if l)}")
 
