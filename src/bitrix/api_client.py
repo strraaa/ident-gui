@@ -706,25 +706,29 @@ class Bitrix24Client:
         if not phones:
             return {}
 
-        # Формируем batch команды (максимум 50 за раз)
-        commands = {}
-        for phone in phones[:50]:
-            # Экранируем специальные символы в телефоне для использования в query string
-            safe_phone = phone.replace('+', '%2B')
-            commands[phone] = f"crm.contact.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=SECOND_NAME&select[]=PHONE"
-
-        results = self.batch_execute(commands)
-
-        # Парсим результаты
-        #  FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
         contacts = {}
-        for phone in phones:
-            if phone in results:
-                # Результат уже является списком контактов
-                contact_list = results[phone] if isinstance(results[phone], list) else []
-                contacts[phone] = contact_list[0] if contact_list else None
-            else:
-                contacts[phone] = None
+
+        # Обрабатываем по 50 элементов за раз (лимит Битрикс24)
+        for i in range(0, len(phones), 50):
+            chunk = phones[i:i + 50]
+
+            # Формируем batch команды для текущего чанка
+            commands = {}
+            for phone in chunk:
+                # Экранируем специальные символы в телефоне для использования в query string
+                safe_phone = phone.replace('+', '%2B')
+                commands[phone] = f"crm.contact.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=SECOND_NAME&select[]=PHONE"
+
+            results = self.batch_execute(commands)
+
+            # Парсим результаты для текущего чанка
+            for phone in chunk:
+                if phone in results:
+                    # Результат уже является списком контактов
+                    contact_list = results[phone] if isinstance(results[phone], list) else []
+                    contacts[phone] = contact_list[0] if contact_list else None
+                else:
+                    contacts[phone] = None
 
         logger.info(f"Batch поиск контактов: запрошено {len(phones)}, найдено {sum(1 for c in contacts.values() if c)}")
 
@@ -744,23 +748,27 @@ class Bitrix24Client:
         if not ident_ids:
             return {}
 
-        # Формируем batch команды (максимум 50 за раз)
-        commands = {}
-        for ident_id in ident_ids[:50]:
-            commands[ident_id] = f"crm.deal.list?filter[UF_CRM_1769072841035]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]=UF_CRM_1769072841035"
-
-        results = self.batch_execute(commands)
-
-        # Парсим результаты
-        #  FIX: batch_execute возвращает результаты напрямую как списки, а не как {result: [...]}
         deals = {}
-        for ident_id in ident_ids:
-            if ident_id in results:
-                # Результат уже является списком сделок
-                deal_list = results[ident_id] if isinstance(results[ident_id], list) else []
-                deals[ident_id] = deal_list[0] if deal_list else None
-            else:
-                deals[ident_id] = None
+
+        # Обрабатываем по 50 элементов за раз (лимит Битрикс24)
+        for i in range(0, len(ident_ids), 50):
+            chunk = ident_ids[i:i + 50]
+
+            # Формируем batch команды для текущего чанка
+            commands = {}
+            for ident_id in chunk:
+                commands[ident_id] = f"crm.deal.list?filter[UF_CRM_1769072841035]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]=UF_CRM_1769072841035"
+
+            results = self.batch_execute(commands)
+
+            # Парсим результаты для текущего чанка
+            for ident_id in chunk:
+                if ident_id in results:
+                    # Результат уже является списком сделок
+                    deal_list = results[ident_id] if isinstance(results[ident_id], list) else []
+                    deals[ident_id] = deal_list[0] if deal_list else None
+                else:
+                    deals[ident_id] = None
 
         logger.info(f"Batch поиск сделок: запрошено {len(ident_ids)}, найдено {sum(1 for d in deals.values() if d)}")
 
@@ -780,28 +788,33 @@ class Bitrix24Client:
         if not contact_ids:
             return {}
 
-        # Формируем batch команды (максимум 50 за раз)
-        commands = {}
-        for contact_id in contact_ids[:50]:
-            commands[str(contact_id)] = f"crm.lead.list?filter[CONTACT_ID]={contact_id}&select[]=ID&select[]=STATUS_ID&select[]=CONTACT_ID"
-
-        logger.debug(f"Batch поиск лидов по CONTACT_ID: {len(commands)} контактов")
-
-        results = self.batch_execute(commands)
-
-        # Парсим результаты
         leads = {}
-        for contact_id in contact_ids:
-            key = str(contact_id)
-            if key in results:
-                lead_list = results[key] if isinstance(results[key], list) else []
-                found_lead = lead_list[0] if lead_list else None
-                leads[contact_id] = found_lead
 
-                if found_lead:
-                    logger.debug(f"Найден лид {found_lead.get('ID')} для контакта {contact_id}")
-            else:
-                leads[contact_id] = None
+        # Обрабатываем по 50 элементов за раз (лимит Битрикс24)
+        for i in range(0, len(contact_ids), 50):
+            chunk = contact_ids[i:i + 50]
+
+            # Формируем batch команды для текущего чанка
+            commands = {}
+            for contact_id in chunk:
+                commands[str(contact_id)] = f"crm.lead.list?filter[CONTACT_ID]={contact_id}&select[]=ID&select[]=STATUS_ID&select[]=CONTACT_ID"
+
+            logger.debug(f"Batch поиск лидов по CONTACT_ID: чанк {len(chunk)} контактов")
+
+            results = self.batch_execute(commands)
+
+            # Парсим результаты для текущего чанка
+            for contact_id in chunk:
+                key = str(contact_id)
+                if key in results:
+                    lead_list = results[key] if isinstance(results[key], list) else []
+                    found_lead = lead_list[0] if lead_list else None
+                    leads[contact_id] = found_lead
+
+                    if found_lead:
+                        logger.debug(f"Найден лид {found_lead.get('ID')} для контакта {contact_id}")
+                else:
+                    leads[contact_id] = None
 
         logger.info(f"Batch поиск лидов по CONTACT_ID: запрошено {len(contact_ids)}, найдено {sum(1 for l in leads.values() if l)}")
 
@@ -839,9 +852,13 @@ class Bitrix24Client:
         for phone in phones:
             contact = contacts_map.get(phone)
             if contact and contact.get('ID'):
-                contact_id = int(contact['ID'])
-                phone_to_contact_id[phone] = contact_id
-                contact_ids.append(contact_id)
+                try:
+                    contact_id = int(contact['ID'])
+                    phone_to_contact_id[phone] = contact_id
+                    contact_ids.append(contact_id)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Некорректный CONTACT_ID для {phone}: {contact.get('ID')} - {e}")
+                    phone_to_contact_id[phone] = None
             else:
                 phone_to_contact_id[phone] = None
 
