@@ -751,6 +751,7 @@ class Bitrix24Client:
     def batch_find_leads_by_phones(self, phones: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
         """
         BATCH ОПТИМИЗАЦИЯ: Ищет несколько лидов по телефонам за один запрос
+        Использует crm.duplicate.findbycomm (рекомендовано Битрикс24) + crm.lead.get
 
         Args:
             phones: Список телефонов
@@ -761,29 +762,65 @@ class Bitrix24Client:
         if not phones:
             return {}
 
-        commands = {}
-        for phone in phones[:50]:
-            safe_phone = phone.replace('+', '%2B')
-            commands[phone] = f"crm.lead.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=STATUS_ID&select[]=CONTACT_ID"
+        leads_result = {}
 
-        logger.debug(f"Batch поиск лидов - команды: {commands}")
-        results = self.batch_execute(commands)
-        logger.debug(f"Batch поиск лидов - результаты: {results}")
+        # Разбиваем на чанки по 20 (лимит crm.duplicate.findbycomm)
+        for chunk_start in range(0, len(phones), 20):
+            chunk = phones[chunk_start:chunk_start + 20]
 
-        leads = {}
-        for phone in phones:
-            if phone in results:
-                lead_list = results[phone] if isinstance(results[phone], list) else []
-                leads[phone] = lead_list[0] if lead_list else None
-                if not lead_list:
-                    logger.debug(f"Для телефона {phone} получен пустой список лидов")
-            else:
-                leads[phone] = None
-                logger.debug(f"Телефон {phone} отсутствует в результатах batch")
+            logger.debug(f"Batch поиск лидов через findbycomm: {len(chunk)} телефонов")
 
-        logger.info(f"Batch поиск лидов: запрошено {len(phones)}, найдено {sum(1 for l in leads.values() if l)}")
+            # Выполняем запрос crm.duplicate.findbycomm
+            result = self._make_request('crm.duplicate.findbycomm', {
+                'type': 'PHONE',
+                'entity_type': 'LEAD',
+                'values': chunk
+            })
 
-        return leads
+            # Результат: {"LEAD": ["123", "456", ...]} - массив ID лидов
+            lead_ids = result.get('result', {}).get('LEAD', [])
+            logger.debug(f"Найдено ID лидов: {lead_ids}")
+
+            if lead_ids:
+                # Получаем полные данные лидов через batch
+                lead_commands = {}
+                for lead_id in lead_ids:
+                    lead_commands[f"lead_{lead_id}"] = f"crm.lead.get?id={lead_id}"
+
+                lead_data_results = self.batch_execute(lead_commands)
+
+                # Теперь нужно сопоставить лиды с телефонами
+                for cmd_key, lead_data in lead_data_results.items():
+                    if lead_data and isinstance(lead_data, dict):
+                        # Получаем телефоны из лида
+                        lead_phones = lead_data.get('PHONE', [])
+
+                        # Сопоставляем с нашими искомыми телефонами
+                        for phone_entry in lead_phones:
+                            phone_value = phone_entry.get('VALUE', '') if isinstance(phone_entry, dict) else str(phone_entry)
+
+                            # Ищем совпадение в наших искомых телефонах
+                            for search_phone in chunk:
+                                # Нормализуем телефоны для сравнения (убираем все кроме цифр)
+                                norm_phone = ''.join(filter(str.isdigit, phone_value))
+                                norm_search = ''.join(filter(str.isdigit, search_phone))
+
+                                if norm_phone == norm_search and search_phone not in leads_result:
+                                    leads_result[search_phone] = {
+                                        'ID': lead_data.get('ID'),
+                                        'STATUS_ID': lead_data.get('STATUS_ID'),
+                                        'CONTACT_ID': lead_data.get('CONTACT_ID')
+                                    }
+                                    break
+
+            # Добавляем None для не найденных телефонов
+            for phone in chunk:
+                if phone not in leads_result:
+                    leads_result[phone] = None
+
+        logger.info(f"Batch поиск лидов: запрошено {len(phones)}, найдено {sum(1 for l in leads_result.values() if l)}")
+
+        return leads_result
 
     def test_connection(self) -> bool:
         """
