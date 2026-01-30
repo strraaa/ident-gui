@@ -314,6 +314,12 @@ class Bitrix24Client:
         return None
 
     @retry_on_api_error(max_attempts=3)
+    def get_deal(self, deal_id: int) -> Optional[Dict[str, Any]]:
+        """Получает информацию о сделке"""
+        result = self._make_request('crm.deal.get', {'id': deal_id})
+        return result.get('result')
+
+    @retry_on_api_error(max_attempts=3)
     def create_contact(self, contact_data: Dict[str, Any]) -> int:
         """Создает новый контакт"""
         fields = {
