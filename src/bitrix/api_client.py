@@ -279,6 +279,7 @@ class Bitrix24Client:
     @retry_on_api_error(max_attempts=3)
     def find_lead_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """Ищет первый лид по телефону"""
+        logger.debug(f"Поиск лида по телефону: {phone}")
         result = self._make_request(
             'crm.lead.list',
             {
@@ -288,6 +289,7 @@ class Bitrix24Client:
         )
 
         leads = result.get('result', [])
+        logger.debug(f"Найдено лидов для {phone}: {len(leads)}")
         return leads[0] if leads else None
 
     @retry_on_api_error(max_attempts=3)
@@ -764,15 +766,20 @@ class Bitrix24Client:
             safe_phone = phone.replace('+', '%2B')
             commands[phone] = f"crm.lead.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=STATUS_ID&select[]=CONTACT_ID"
 
+        logger.debug(f"Batch поиск лидов - команды: {commands}")
         results = self.batch_execute(commands)
+        logger.debug(f"Batch поиск лидов - результаты: {results}")
 
         leads = {}
         for phone in phones:
             if phone in results:
                 lead_list = results[phone] if isinstance(results[phone], list) else []
                 leads[phone] = lead_list[0] if lead_list else None
+                if not lead_list:
+                    logger.debug(f"Для телефона {phone} получен пустой список лидов")
             else:
                 leads[phone] = None
+                logger.debug(f"Телефон {phone} отсутствует в результатах batch")
 
         logger.info(f"Batch поиск лидов: запрошено {len(phones)}, найдено {sum(1 for l in leads.values() if l)}")
 
