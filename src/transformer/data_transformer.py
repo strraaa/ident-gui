@@ -15,6 +15,7 @@
 import re
 import logging
 from datetime import datetime
+from decimal import Decimal
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 
@@ -411,6 +412,16 @@ class DataTransformer:
         # Определение стадии
         stage = StageMapper.get_stage(reception.get('Status', 'Запланирован'), current_stage)
 
+        # ИСПРАВЛЕНИЕ: Безопасное преобразование суммы (Decimal из БД)
+        # Decimal→float может терять точность, поэтому округляем до 2 знаков (копейки)
+        amount = reception.get('TotalAmount', 0) or 0
+        if isinstance(amount, Decimal):
+            # Округляем Decimal до 2 знаков после запятой перед преобразованием
+            opportunity_value = float(round(amount, 2))
+        else:
+            # Для int/float используем обычное преобразование
+            opportunity_value = float(amount)
+
         # Формирование данных для Bitrix24
         transformed = {
             # Идентификаторы
@@ -433,7 +444,7 @@ class DataTransformer:
             'deal': {
                 'title': reception['PatientFullName'],
                 'stage_id': stage,
-                'opportunity': float(reception.get('TotalAmount', 0) or 0),  # Сумма (конвертируем Decimal в float)
+                'opportunity': opportunity_value,  # Сумма (безопасно преобразовано из Decimal)
                 'currency_id': 'RUB',
 
                 # Кастомные поля (актуальные ID из Bitrix24)

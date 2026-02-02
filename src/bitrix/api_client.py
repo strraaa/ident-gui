@@ -169,10 +169,14 @@ class Bitrix24Client:
         # Rate limiter
         self.rate_limiter = RateLimiter() if enable_rate_limiting else None
 
+        # ИСПРАВЛЕНИЕ: Маскируем токен в webhook_url для безопасности (не логируем секретный токен)
+        # Формат webhook: https://domain.bitrix24.ru/rest/123/SECRET_TOKEN/
+        masked_url = self.webhook_url.split('/rest/')[0] + '/rest/***' if '/rest/' in self.webhook_url else self.webhook_url[:30] + '***'
+
         if default_assigned_by_id:
-            logger.info(f"Bitrix24Client инициализирован: {self.webhook_url[:50]}... (ответственный: {default_assigned_by_id})")
+            logger.info(f"Bitrix24Client инициализирован: {masked_url} (ответственный: {default_assigned_by_id})")
         else:
-            logger.info(f"Bitrix24Client инициализирован: {self.webhook_url[:50]}...")
+            logger.info(f"Bitrix24Client инициализирован: {masked_url}")
 
     def _make_request(
         self,
@@ -409,7 +413,6 @@ class Bitrix24Client:
         return deals
 
     @retry_on_api_error(max_attempts=3)
-    @retry_on_api_error(max_attempts=3)
     def create_deal(self, deal_data: Dict[str, Any], contact_id: int) -> int:
         """
         Создает новую сделку
@@ -528,7 +531,6 @@ class Bitrix24Client:
             logger.error(f"Ошибка обновления сделки {deal_id}: {e}")
             raise
 
-    @retry_on_api_error(max_attempts=3)
     @retry_on_api_error(max_attempts=3)
     def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False) -> Dict[str, Any]:
         """

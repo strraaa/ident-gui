@@ -116,6 +116,11 @@ class ConnectionPool:
         except Exception as e:
             # Если ошибка при работе с соединением - помечаем его как мертвое
             if conn:
+                # ИСПРАВЛЕНИЕ: Удаляем старое мертвое соединение из словаря времен (предотвращение memory leak)
+                old_conn_id = id(conn)
+                if old_conn_id in self.connection_times:
+                    del self.connection_times[old_conn_id]
+
                 try:
                     conn.close()
                 except Exception:
@@ -795,7 +800,7 @@ class IdentConnector:
         WHERE
             p.Surname = ?
             AND p.Name = ?
-            AND (? = '' OR p.Patronymic = ?)
+            AND (? = '' OR p.Patronymic IS NULL OR p.Patronymic = ?)
             AND tp.IsActive = 1
 
         ORDER BY
