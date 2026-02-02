@@ -328,15 +328,14 @@ class ReceptionValidator:
             if not isinstance(reception['StartTime'], datetime):
                 errors.append(f"StartTime должен быть datetime, получен: {type(reception['StartTime'])}")
 
-        # Предупреждения
+        # Предупреждения (только критичные)
         if not reception.get('Filial'):
             warnings.append("Филиал не определен (будет 'Не указан')")
 
-        if not reception.get('Services'):
-            warnings.append("Услуги не указаны")
-
-        if not reception.get('TotalAmount') or reception['TotalAmount'] == 0:
-            warnings.append("Сумма не указана или равна 0")
+        # ИСПРАВЛЕНИЕ: Убраны warnings об услугах и сумме
+        # Причина: Услуги и сумма добавляются в конце записи (после создания)
+        # На момент первой синхронизации они могут быть пустыми - это нормально
+        # Генерировали лишний шум в логах и создавали "фантомные обновления"
 
         return ValidationResult(
             is_valid=len(errors) == 0,
