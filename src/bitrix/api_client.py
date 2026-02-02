@@ -466,8 +466,12 @@ class Bitrix24Client:
             if self.default_assigned_by_id:
                 fields['ASSIGNED_BY_ID'] = self.default_assigned_by_id
 
-            # Удаляем None значения
-            fields = {k: v for k, v in fields.items() if v is not None}
+            # ИСПРАВЛЕНИЕ: Удаляем None и пустые строки (бесполезные для Bitrix24)
+            # Оставляем 0 и False (валидные значения)
+            fields = {
+                k: v for k, v in fields.items()
+                if v is not None and v != ''  # Убираем None и пустые строки
+            }
 
             result = self._make_request('crm.deal.add', {'fields': fields})
 
@@ -521,15 +525,40 @@ class Bitrix24Client:
                 'UF_CRM_1769167398642': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
 
-            # Удаляем None значения
-            fields = {k: v for k, v in fields.items() if v is not None}
+            # ИСПРАВЛЕНИЕ: Удаляем None и пустые строки (бесполезные для Bitrix24)
+            # Оставляем 0 и False (валидные значения)
+            fields = {
+                k: v for k, v in fields.items()
+                if v is not None and v != ''  # Убираем None и пустые строки
+            }
+
+            # ИСПРАВЛЕНИЕ: Логируем если поля пустые (помогает диагностировать "фантомные" обновления)
+            if not fields:
+                logger.warning(
+                    f"Попытка обновить сделку {deal_id} с ПУСТЫМИ полями! "
+                    f"Все значения были None. Bitrix24 примет запрос, но ничего не изменит."
+                )
+                return True  # Технически "успешно", но бесполезно
+
+            # ДИАГНОСТИКА: Детальное логирование обновляемых полей
+            field_names = list(fields.keys())
+            logger.info(
+                f"Обновление сделки {deal_id}: {len(fields)} полей "
+                f"[{', '.join(field_names[:5])}{'...' if len(field_names) > 5 else ''}]"
+            )
+
+            # Логируем ключевые поля для диагностики "пустых" обновлений
+            key_fields = ['TITLE', 'STAGE_ID', 'OPPORTUNITY', 'UF_CRM_1769008900', 'UF_CRM_1769008996']
+            key_values = {k: fields.get(k, '<отсутствует>') for k in key_fields if k in fields}
+            if key_values:
+                logger.debug(f"Ключевые поля сделки {deal_id}: {key_values}")
 
             result = self._make_request(
                 'crm.deal.update',
                 {'id': deal_id, 'fields': fields}
             )
 
-            logger.info(f"Обновлена сделка ID={deal_id}")
+            logger.info(f"✓ Обновлена сделка ID={deal_id} ({len(fields)} полей)")
             return True
 
         except Bitrix24Error as e:
