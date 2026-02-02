@@ -43,14 +43,17 @@ class Bitrix24NotFoundError(Bitrix24Error):
     pass
 
 
-def retry_on_api_error(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
+def retry_on_api_error(max_attempts: int = 5, delay: float = 2.0, backoff: float = 2.5):
     """
     Декоратор для retry при ошибках API
 
+    ИСПРАВЛЕНИЕ: Увеличено max_attempts с 3 до 5, delay с 1.0 до 2.0, backoff с 2.0 до 2.5
+    Предотвращает ConnectionResetError: более агрессивный retry с большими паузами
+
     Args:
-        max_attempts: Максимальное количество попыток
-        delay: Начальная задержка в секундах
-        backoff: Множитель для экспоненциальной задержки
+        max_attempts: Максимальное количество попыток (5 вместо 3)
+        delay: Начальная задержка в секундах (2.0 вместо 1.0)
+        backoff: Множитель для экспоненциальной задержки (2.5 вместо 2.0)
     """
     def decorator(func):
         @wraps(func)
@@ -95,7 +98,9 @@ class RateLimiter:
     - 120 запросов в минуту
     """
 
-    def __init__(self, requests_per_second: float = 2.0, requests_per_minute: int = 120):
+    def __init__(self, requests_per_second: float = 1.0, requests_per_minute: int = 60):
+        # ИСПРАВЛЕНИЕ: Уменьшено с 2.0 до 1.0 req/sec и 120 до 60 req/min
+        # Предотвращает ConnectionResetError от Bitrix24 при высокой нагрузке
         self.requests_per_second = requests_per_second
         self.requests_per_minute = requests_per_minute
 
@@ -256,7 +261,7 @@ class Bitrix24Client:
         except requests.RequestException as e:
             raise Bitrix24Error(f"Ошибка HTTP запроса: {e}")
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """Ищет первый контакт по телефону"""
         result = self._make_request(
@@ -280,7 +285,7 @@ class Bitrix24Client:
 
         return None
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_lead_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """
         Ищет первый лид по телефону
@@ -315,7 +320,7 @@ class Bitrix24Client:
         logger.debug(f"Найдено лидов для контакта {contact_id}: {len(leads)}")
         return leads[0] if leads else None
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def convert_lead(self, lead_id: int, contact_id: Optional[int] = None) -> Optional[int]:
         """Конвертирует лид в сделку"""
         params = {
@@ -338,13 +343,13 @@ class Bitrix24Client:
         logger.warning(f"Конвертация лида {lead_id} не вернула ID сделки")
         return None
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def get_deal(self, deal_id: int) -> Optional[Dict[str, Any]]:
         """Получает информацию о сделке"""
         result = self._make_request('crm.deal.get', {'id': deal_id})
         return result.get('result')
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def create_contact(self, contact_data: Dict[str, Any]) -> int:
         """Создает новый контакт"""
         fields = {
@@ -370,7 +375,7 @@ class Bitrix24Client:
 
         return int(contact_id)
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deal_by_ident_id(self, ident_id: str) -> Optional[Dict[str, Any]]:
         """Ищет сделку по IDENT ID"""
         result = self._make_request(
@@ -384,7 +389,7 @@ class Bitrix24Client:
         deals = result.get('result', [])
         return deals[0] if deals else None
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deals_by_contact_without_ident_id(
         self,
         contact_id: int,
@@ -412,7 +417,7 @@ class Bitrix24Client:
 
         return deals
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def create_deal(self, deal_data: Dict[str, Any], contact_id: int) -> int:
         """
         Создает новую сделку
@@ -478,7 +483,7 @@ class Bitrix24Client:
             logger.error(f"Ошибка создания сделки: {e}")
             raise
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def update_deal(self, deal_id: int, deal_data: Dict[str, Any]) -> bool:
         """
         Обновляет существующую сделку
@@ -531,7 +536,7 @@ class Bitrix24Client:
             logger.error(f"Ошибка обновления сделки {deal_id}: {e}")
             raise
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False) -> Dict[str, Any]:
         """
          BATCH ОПТИМИЗАЦИЯ: Выполняет несколько команд за один запрос
@@ -596,7 +601,7 @@ class Bitrix24Client:
             logger.error(f"Ошибка batch запроса: {e}")
             raise
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_find_contacts_by_phones(self, phones: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
         """
          BATCH ОПТИМИЗАЦИЯ: Ищет несколько контактов по телефонам за один запрос
@@ -638,7 +643,7 @@ class Bitrix24Client:
 
         return contacts
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_find_deals_by_ident_ids(self, ident_ids: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
         """
          BATCH ОПТИМИЗАЦИЯ: Ищет несколько сделок по ID из Ident за один запрос
@@ -678,7 +683,7 @@ class Bitrix24Client:
 
         return deals
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_find_leads_by_contact_ids(self, contact_ids: List[int]) -> Dict[int, Optional[Dict[str, Any]]]:
         """
         BATCH ОПТИМИЗАЦИЯ: Ищет лиды по CONTACT_ID
@@ -724,7 +729,7 @@ class Bitrix24Client:
 
         return leads
 
-    @retry_on_api_error(max_attempts=3)
+    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_find_leads_by_phones(self, phones: List[str], contacts_map: Optional[Dict[str, Optional[Dict[str, Any]]]] = None) -> Dict[str, Optional[Dict[str, Any]]]:
         """
         BATCH ОПТИМИЗАЦИЯ: Ищет несколько лидов по телефонам
