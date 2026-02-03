@@ -193,6 +193,8 @@ class Bitrix24Client:
         self.request_timeout = request_timeout
         self.max_retries = max_retries
         self.default_assigned_by_id = default_assigned_by_id
+        # Переиспользуем HTTP-сессию для стабильности и производительности
+        self._session = requests.Session()
 
         # Rate limiter
         self.rate_limiter = RateLimiter() if enable_rate_limiting else None
@@ -249,7 +251,7 @@ class Bitrix24Client:
         url = f"{self.webhook_url}/{method}"
 
         try:
-            response = requests.post(
+            response = self._session.post(
                 url,
                 json=params or {},
                 timeout=self.request_timeout
@@ -697,18 +699,28 @@ class Bitrix24Client:
             batch_result = result.get('result', {})
             result_data = batch_result.get('result', {})
 
-            # Логируем ошибки если есть
+            # Логируем и поднимаем ошибки если есть
             if 'result_error' in batch_result:
                 result_error = batch_result['result_error']
+                errors_summary = []
                 # result_error может быть словарём или списком в зависимости от версии API
                 if isinstance(result_error, dict):
                     for cmd_name, error in result_error.items():
-                        logger.warning(f"Batch команда '{cmd_name}' завершилась с ошибкой: {error}")
+                        msg = f"Batch команда '{cmd_name}' завершилась с ошибкой: {error}"
+                        errors_summary.append(msg)
+                        logger.warning(msg)
                 elif isinstance(result_error, list):
                     for error in result_error:
-                        logger.warning(f"Batch ошибка: {error}")
+                        msg = f"Batch ошибка: {error}"
+                        errors_summary.append(msg)
+                        logger.warning(msg)
                 else:
-                    logger.warning(f"Batch содержит ошибки: {result_error}")
+                    msg = f"Batch содержит ошибки: {result_error}"
+                    errors_summary.append(msg)
+                    logger.warning(msg)
+
+                # Считаем batch неуспешным, чтобы избежать тихих потерь данных
+                raise Bitrix24Error("Batch завершился с ошибками: " + "; ".join(errors_summary))
 
             logger.debug(f"Batch выполнен: {len(commands)} команд, успешно: {len(result_data)}")
 

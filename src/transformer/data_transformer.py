@@ -194,6 +194,10 @@ class ServicesAggregator:
             last_comma = truncated.rfind(',')
             if last_comma > 0:
                 truncated = truncated[:last_comma]
+            logger.warning(
+                f"Список услуг обрезан до {max_length} символов "
+                f"(исходная длина {len(services_text)})"
+            )
             return truncated + "..."
 
         return services_text

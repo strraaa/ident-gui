@@ -9,6 +9,7 @@
 """
 
 import logging
+import logging.handlers
 import os
 import re
 import threading
@@ -132,7 +133,9 @@ class ThreadSafeLogger:
         log_dir: str = 'logs',
         level: str = 'INFO',
         rotation_days: int = 30,
-        mask_personal_data: bool = True
+        mask_personal_data: bool = True,
+        max_log_size_mb: int = 20,
+        max_backup_files: int = 5
     ) -> logging.Logger:
         """
         Получает thread-safe singleton экземпляр логгера
@@ -143,6 +146,8 @@ class ThreadSafeLogger:
             level: Уровень логирования
             rotation_days: Срок хранения логов (дни)
             mask_personal_data: Маскировать ли персональные данные
+            max_log_size_mb: Максимальный размер одного файла лога (MB)
+            max_backup_files: Количество резервных файлов при ротации по размеру
 
         Returns:
             Настроенный экземпляр логгера
@@ -187,7 +192,13 @@ class ThreadSafeLogger:
 
             # ===== ФАЙЛОВЫЙ HANDLER (с ротацией по дате) =====
             log_file = log_path / f"integration_log_{datetime.now().strftime('%Y-%m-%d')}.txt"
-            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            max_bytes = max(1, int(max_log_size_mb)) * 1024 * 1024
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=max_bytes,
+                backupCount=max(1, int(max_backup_files)),
+                encoding='utf-8'
+            )
             file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(formatter)
 
@@ -241,10 +252,13 @@ class ThreadSafeLogger:
         try:
             cutoff_date = datetime.now() - timedelta(days=retention_days)
 
-            for log_file in log_dir.glob('integration_log_*.txt'):
+            for log_file in log_dir.glob('integration_log_*.txt*'):
                 try:
                     # Извлекаем дату из имени файла
-                    date_str = log_file.stem.replace('integration_log_', '')
+                    # Учитываем файлы с ротацией по размеру (например *.txt.1)
+                    name = log_file.name
+                    base = name.split('.txt')[0]
+                    date_str = base.replace('integration_log_', '')
                     file_date = datetime.strptime(date_str, '%Y-%m-%d')
 
                     # Удаляем если старше retention_days
@@ -264,7 +278,9 @@ def get_logger(
     log_dir: str = 'logs',
     level: str = 'INFO',
     rotation_days: int = 30,
-    mask_personal_data: bool = True
+    mask_personal_data: bool = True,
+    max_log_size_mb: int = 20,
+    max_backup_files: int = 5
 ) -> logging.Logger:
     """
     Функция-обертка для получения thread-safe логгера
@@ -275,6 +291,8 @@ def get_logger(
         level: Уровень логирования
         rotation_days: Срок хранения логов (дни)
         mask_personal_data: Маскировать ли персональные данные
+        max_log_size_mb: Максимальный размер одного файла лога (MB)
+        max_backup_files: Количество резервных файлов при ротации по размеру
 
     Returns:
         Настроенный экземпляр логгера
@@ -284,7 +302,9 @@ def get_logger(
         log_dir=log_dir,
         level=level,
         rotation_days=rotation_days,
-        mask_personal_data=mask_personal_data
+        mask_personal_data=mask_personal_data,
+        max_log_size_mb=max_log_size_mb,
+        max_backup_files=max_backup_files
     )
 
 

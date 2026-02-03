@@ -468,6 +468,7 @@ class IdentConnector:
             logger.info(f"Первая синхронизация: загружаем данные за последние {initial_days} дней")
 
         # ОПТИМИЗИРОВАННЫЙ ЗАПРОС: убран N+1 problem через OUTER APPLY
+        # ВАЖНО: используем единый "LastUpdate" для корректной инкрементальной синхронизации.
         query = """
         SELECT TOP (?)
             -- Данные записи
@@ -525,7 +526,8 @@ class IdentConnector:
 
             -- Метки времени для инкрементальной синхронизации
             r.DateTimeAdded AS CreatedAt,
-            r.DateTimeChanged AS ChangedAt
+            r.DateTimeChanged AS ChangedAt,
+            lu.LastUpdate AS LastUpdate
 
         FROM Receptions r
             -- Пациент
@@ -565,19 +567,27 @@ class IdentConnector:
                 INNER JOIN ServiceItemPrices sip ON osr.ID_ServicePrices = sip.ID
                 WHERE osr.ID_Orders = o.ID
             ) services_agg
+            -- Единая метка последнего изменения для корректного курсора
+            OUTER APPLY (
+                SELECT MAX(v.dt) AS LastUpdate
+                FROM (VALUES
+                    (r.DateTimeAdded),
+                    (r.DateTimeChanged),
+                    (r.PatientAppeared),
+                    (r.ReceptionStarted),
+                    (r.ReceptionEnded),
+                    (r.ReceptionCanceled)
+                ) AS v(dt)
+            ) lu
 
         WHERE
-            -- Инкрементальная выборка
+            -- Инкрементальная выборка по единой метке
             (
-                r.DateTimeAdded > ?
-                OR r.DateTimeChanged > ?
-                OR r.PatientAppeared > ?
-                OR r.ReceptionStarted > ?
-                OR r.ReceptionEnded > ?
-                OR r.ReceptionCanceled > ?
+                lu.LastUpdate > ?
+                OR (lu.LastUpdate = ? AND r.ID > ?)
             )
 
-        ORDER BY r.PlanStart DESC, r.ID DESC
+        ORDER BY lu.LastUpdate ASC, r.ID ASC
         """
 
         try:
@@ -588,8 +598,9 @@ class IdentConnector:
                         query,
                         (
                             batch_size,
-                            last_sync_time, last_sync_time, last_sync_time,
-                            last_sync_time, last_sync_time, last_sync_time
+                            last_sync_time,
+                            last_sync_time,
+                            0
                         )
                     )
 
@@ -651,7 +662,7 @@ class IdentConnector:
             last_sync_time = datetime.now() - timedelta(days=initial_days)
             logger.info(f"Первая синхронизация: загружаем данные за последние {initial_days} дней")
 
-        # Используем тот же запрос что и в get_receptions()
+        # Используем тот же запрос что и в get_receptions(), но с курсором для стабильной пагинации
         query = """
         SELECT TOP (?)
             -- Данные записи
@@ -709,7 +720,8 @@ class IdentConnector:
 
             -- Метки времени для инкрементальной синхронизации
             r.DateTimeAdded AS CreatedAt,
-            r.DateTimeChanged AS ChangedAt
+            r.DateTimeChanged AS ChangedAt,
+            lu.LastUpdate AS LastUpdate
 
         FROM Receptions r
             INNER JOIN Patients pat ON r.ID_Patients = pat.ID_Persons
@@ -738,44 +750,64 @@ class IdentConnector:
                 INNER JOIN ServiceItemPrices sip ON osr.ID_ServicePrices = sip.ID
                 WHERE osr.ID_Orders = o.ID
             ) services_agg
+            OUTER APPLY (
+                SELECT MAX(v.dt) AS LastUpdate
+                FROM (VALUES
+                    (r.DateTimeAdded),
+                    (r.DateTimeChanged),
+                    (r.PatientAppeared),
+                    (r.ReceptionStarted),
+                    (r.ReceptionEnded),
+                    (r.ReceptionCanceled)
+                ) AS v(dt)
+            ) lu
 
         WHERE
             (
-                r.DateTimeAdded > ?
-                OR r.DateTimeChanged > ?
-                OR r.PatientAppeared > ?
-                OR r.ReceptionStarted > ?
-                OR r.ReceptionEnded > ?
-                OR r.ReceptionCanceled > ?
+                lu.LastUpdate > ?
+                OR (lu.LastUpdate = ? AND r.ID > ?)
             )
 
-        ORDER BY r.PlanStart DESC, r.ID DESC
+        ORDER BY lu.LastUpdate ASC, r.ID ASC
         """
 
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 try:
-                    cursor.execute(
-                        query,
-                        (
-                            batch_size,
-                            last_sync_time, last_sync_time, last_sync_time,
-                            last_sync_time, last_sync_time, last_sync_time
-                        )
-                    )
-
-                    columns = [column[0] for column in cursor.description]
+                    last_seen_time = last_sync_time
+                    last_seen_id = 0
                     total_count = 0
 
                     while True:
-                        rows = cursor.fetchmany(fetch_size)
-                        if not rows:
-                            break
+                        cursor.execute(
+                            query,
+                            (
+                                batch_size,
+                                last_seen_time,
+                                last_seen_time,
+                                last_seen_id
+                            )
+                        )
 
-                        for row in rows:
-                            total_count += 1
-                            yield dict(zip(columns, row))
+                        columns = [column[0] for column in cursor.description]
+                        batch_rows = 0
+
+                        while True:
+                            rows = cursor.fetchmany(fetch_size)
+                            if not rows:
+                                break
+
+                            for row in rows:
+                                batch_rows += 1
+                                total_count += 1
+                                record = dict(zip(columns, row))
+                                last_seen_time = record.get('LastUpdate') or last_seen_time
+                                last_seen_id = record.get('ReceptionID') or last_seen_id
+                                yield record
+
+                        if batch_rows == 0:
+                            break
 
                     logger.info(f"Извлечено записей (генератор): {total_count}")
                 finally:

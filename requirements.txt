@@ -31,10 +31,10 @@ pytest-mock==3.12.0
 flask==3.0.0
 
 # Windows Service
-pywin32==306; sys_platform == 'win32'
+pywin32==311; sys_platform == 'win32'
 
 # Упаковка в .exe
-pyinstaller==6.3.0
+pyinstaller==6.18.0
 
 # Работа с очередями
 sqlitedict==2.1.0

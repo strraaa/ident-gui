@@ -217,12 +217,22 @@ class ConfigManager:
             if not webhook_url.startswith(('http://', 'https://')):
                 errors.append(f"Некорректный webhook_url: должен начинаться с http:// или https://")
 
-        # 4. Проверка DPAPI
+        # 4. Проверка DPAPI (только если зашифрованные значения реально используются)
         if not DPAPI_AVAILABLE:
-            errors.append(
-                "Модуль win32crypt не установлен - шифрование недоступно!\n"
-                "Установите: pip install pywin32"
-            )
+            encrypted_in_use = False
+            for section, option in self.ENCRYPTED_FIELDS:
+                if self.config.has_option(section, option):
+                    value = self.config.get(section, option, fallback='')
+                    if value and value.startswith('DPAPI:'):
+                        encrypted_in_use = True
+                        break
+            if encrypted_in_use:
+                errors.append(
+                    "Модуль win32crypt не установлен, но в конфигурации есть DPAPI-зашифрованные значения.\n"
+                    "Установите: pip install pywin32"
+                )
+            else:
+                logger.warning("DPAPI недоступен: шифрование будет отключено, но конфигурация не использует DPAPI.")
 
         return errors
 
@@ -356,6 +366,22 @@ class ConfigManager:
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 self.config.write(f)
+            # Best-effort ограничение прав доступа
+            try:
+                if sys.platform == 'win32':
+                    import subprocess
+                    user = os.environ.get('USERNAME') or os.getlogin()
+                    subprocess.run(
+                        ['icacls', str(self.config_path), '/inheritance:r',
+                         '/grant', f'{user}:(R,W)', 'SYSTEM:(F)', 'Administrators:(F)'],
+                        check=False,
+                        capture_output=True,
+                        text=True
+                    )
+                else:
+                    os.chmod(self.config_path, 0o600)
+            except Exception as e:
+                logger.warning(f"Не удалось ограничить права доступа к {self.config_path}: {e}")
         except Exception as e:
             logger.error(f"Ошибка сохранения конфигурации: {e}", exc_info=True)
             raise
@@ -450,39 +476,73 @@ class ConfigManager:
 
     def get_sync_config(self) -> Dict[str, Any]:
         """Возвращает конфигурацию синхронизации"""
+        # Поддержка старого имени initial_sync_days для обратной совместимости
+        if self.config.has_option('Sync', 'initial_days'):
+            initial_days = self.config.getint('Sync', 'initial_days', fallback=7)
+        else:
+            initial_days = self.config.getint('Sync', 'initial_sync_days', fallback=7)
         return {
             'filial_id': self.config.getint('Sync', 'filial_id'),
             'interval_minutes': self.config.getint('Sync', 'interval_minutes', fallback=2),
             'batch_size': self.config.getint('Sync', 'batch_size', fallback=50),
-            'initial_days': self.config.getint('Sync', 'initial_days', fallback=7),
+            'initial_days': initial_days,
             'enable_update_existing': self.config.getboolean('Sync', 'enable_update_existing', fallback=True),
         }
 
     def get_logging_config(self) -> Dict[str, Any]:
         """Возвращает конфигурацию логирования"""
+        # Поддержка старого ключа max_file_size_mb
+        if self.config.has_option('Logging', 'max_log_size_mb'):
+            max_log_size_mb = self.config.getint('Logging', 'max_log_size_mb', fallback=20)
+        else:
+            max_log_size_mb = self.config.getint('Logging', 'max_file_size_mb', fallback=20)
         return {
             'level': self.config.get('Logging', 'level', fallback='INFO'),
             'log_dir': self.config.get('Logging', 'log_dir', fallback='logs'),
             'rotation_days': self.config.getint('Logging', 'rotation_days', fallback=30),
             'mask_personal_data': self.config.getboolean('Logging', 'mask_personal_data', fallback=True),
+            'max_log_size_mb': max_log_size_mb,
+            'max_backup_files': self.config.getint('Logging', 'max_backup_files', fallback=5),
         }
 
     def get_queue_config(self) -> Dict[str, Any]:
         """Возвращает конфигурацию очереди"""
+        # Поддержка старых ключей
+        enabled = self.config.getboolean('Queue', 'enabled', fallback=True)
+        if self.config.has_option('Queue', 'max_size'):
+            max_size = self.config.getint('Queue', 'max_size', fallback=1000)
+        else:
+            max_size = self.config.getint('Queue', 'max_queue_size', fallback=1000)
+        if self.config.has_option('Queue', 'persistence_file'):
+            persistence_file = self.config.get('Queue', 'persistence_file', fallback='queue.json')
+        else:
+            persistence_file = self.config.get('Queue', 'queue_db_path', fallback='queue.json')
         return {
-            'enabled': self.config.getboolean('Queue', 'enabled', fallback=True),
-            'max_size': self.config.getint('Queue', 'max_size', fallback=1000),
-            'persistence_file': self.config.get('Queue', 'persistence_file', fallback='queue.json'),
+            'enabled': enabled,
+            'max_size': max_size,
+            'persistence_file': persistence_file,
             'retry_interval_minutes': self.config.getint('Queue', 'retry_interval_minutes', fallback=5),
             'max_retry_attempts': self.config.getint('Queue', 'max_retry_attempts', fallback=3),
         }
 
     def get_monitoring_config(self) -> Dict[str, Any]:
         """Возвращает конфигурацию мониторинга"""
+        # Поддержка старых ключей enabled/host/port/debug
+        enable_web = self.config.getboolean('Monitoring', 'enable_web_interface', fallback=None) if self.config.has_option('Monitoring', 'enable_web_interface') else None
+        if enable_web is None:
+            enable_web = self.config.getboolean('Monitoring', 'enabled', fallback=False)
+        web_port = self.config.getint('Monitoring', 'web_port', fallback=None) if self.config.has_option('Monitoring', 'web_port') else None
+        if web_port is None:
+            web_port = self.config.getint('Monitoring', 'port', fallback=8080)
+        enable_metrics = self.config.getboolean('Monitoring', 'enable_metrics', fallback=None) if self.config.has_option('Monitoring', 'enable_metrics') else None
+        if enable_metrics is None:
+            enable_metrics = self.config.getboolean('Monitoring', 'debug', fallback=False)
+
         return {
-            'enable_web_interface': self.config.getboolean('Monitoring', 'enable_web_interface', fallback=True),
-            'web_port': self.config.getint('Monitoring', 'web_port', fallback=8080),
-            'enable_metrics': self.config.getboolean('Monitoring', 'enable_metrics', fallback=True),
+            'enable_web_interface': enable_web,
+            'web_host': self.config.get('Monitoring', 'web_host', fallback=self.config.get('Monitoring', 'host', fallback='localhost')),
+            'web_port': web_port,
+            'enable_metrics': enable_metrics,
         }
 
     def get_all_config(self) -> Dict[str, Dict[str, Any]]:
