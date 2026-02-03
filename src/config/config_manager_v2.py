@@ -79,21 +79,41 @@ class ConfigManager:
         """
         self.config_path = Path(config_path)
 
-        if not self.config_path.exists():
-            raise FileNotFoundError(
-                f"Файл конфигурации не найден: {self.config_path}\n"
-                f"Создайте config.ini на основе config.example.ini"
-            )
-
         self.config = configparser.ConfigParser(interpolation=None)
 
-        # Проверяем права доступа (только на Unix-like системах)
-        if sys.platform != 'win32':
+        # Ищем пример конфигурации (config.example.ini) рядом с config_path или в CWD
+        example_path = self.config_path.with_name('config.example.ini')
+        cwd_example = Path.cwd() / 'config.example.ini'
+
+        files_to_read = []
+
+        # Если example рядом с config_path существует - используем его как источник defaults
+        if example_path.exists():
+            files_to_read.append(str(example_path))
+        elif cwd_example.exists():
+            files_to_read.append(str(cwd_example))
+
+        # Если пользовательский config.ini существует - он должен переопределять example
+        if self.config_path.exists():
+            files_to_read.append(str(self.config_path))
+        else:
+            if not files_to_read:
+                # Ни config.ini ни config.example.ini не найдены - критическая ошибка
+                raise FileNotFoundError(
+                    f"Файл конфигурации не найден: {self.config_path}\n"
+                    f"Создайте {self.config_path.name} на основе config.example.ini"
+                )
+            # config.ini отсутствует, но есть example — используем example и логируем предупреждение
+            logger.warning(f"Файл {self.config_path} не найден — использую {files_to_read[0]} как дефолтную конфигурацию")
+
+        # Проверяем права доступа (только на Unix-like системах) если найден config.ini
+        if sys.platform != 'win32' and self.config_path.exists():
             self._check_file_permissions()
 
-        # Загружаем конфигурацию
+        # Загружаем конфигурацию (сначала example как defaults, затем config.ini для переопределения)
         try:
-            self.config.read(self.config_path, encoding='utf-8')
+            read_files = self.config.read(files_to_read, encoding='utf-8')
+            logger.info(f"Загружены конфигурационные файлы: {read_files}")
         except Exception as e:
             raise ConfigValidationError(f"Ошибка чтения файла конфигурации: {e}") from e
 
@@ -364,10 +384,57 @@ class ConfigManager:
 
         return {
             'webhook_url': self.config.get('Bitrix24', 'webhook_url'),
-            'token': self._get_decrypted('Bitrix24', 'token'),  # Расшифровываем
+            'token': self._get_decrypted('Bitrix24', 'token'),  # Расшифровиваем
             'request_timeout': self.config.getint('Bitrix24', 'request_timeout', fallback=30),
             'max_retries': self.config.getint('Bitrix24', 'max_retries', fallback=3),
             'default_assigned_by_id': int(assigned_by_id) if assigned_by_id else None,
+        }
+
+    def get_bitrix_field_map(self) -> Dict[str, str]:
+        """Возвращает маппинг логических имён полей → фактические UF_CRM имена"""
+        # Безопасные значения по-умолчанию (совпадают с текущим кодом)
+        return {
+            'ident_field': self.config.get('Bitrix24', 'ident_field', fallback='UF_CRM_1769072841035'),
+            'contact_card_number': self.config.get('Bitrix24', 'contact_card_number', fallback='UF_CRM_1769083788971'),
+            'contact_parent': self.config.get('Bitrix24', 'contact_parent', fallback='UF_CRM_1769087537061'),
+            'deal_start': self.config.get('Bitrix24', 'deal_start_field', fallback='UF_CRM_1769008900'),
+            'deal_end': self.config.get('Bitrix24', 'deal_end_field', fallback='UF_CRM_1769008947'),
+            'deal_doctor': self.config.get('Bitrix24', 'deal_doctor_field', fallback='UF_CRM_1769008996'),
+            'deal_services': self.config.get('Bitrix24', 'deal_services_field', fallback='UF_CRM_1769009098'),
+            'deal_status': self.config.get('Bitrix24', 'deal_status_field', fallback='UF_CRM_1769009157'),
+            'deal_card_number': self.config.get('Bitrix24', 'deal_card_number_field', fallback='UF_CRM_1769083581481'),
+            'deal_parent': self.config.get('Bitrix24', 'deal_parent_field', fallback='UF_CRM_1769087458477'),
+            'deal_comment': self.config.get('Bitrix24', 'deal_comment_field', fallback='UF_CRM_1769494714842'),
+            'treatment_plan': self.config.get('Bitrix24', 'treatment_plan_field', fallback='UF_CRM_1769167266723'),
+            'treatment_plan_hash': self.config.get('Bitrix24', 'treatment_plan_hash_field', fallback='UF_CRM_1769167398642'),
+            'filial': self.config.get('Bitrix24', 'filial_field', fallback='UF_CRM_FILIAL'),
+            'armchair': self.config.get('Bitrix24', 'armchair_field', fallback='UF_CRM_ARMCHAIR'),
+            'status_field': self.config.get('Bitrix24', 'status_field', fallback='UF_CRM_STATUS'),
+        }
+
+    def get_stage_config(self) -> Dict[str, Any]:
+        """Возвращает конфигурацию стадий: маппинг, финальные и защищённые"""
+        # Считываем JSON-подобные строки из конфига или используем простые CSV значения
+        def _get_map(section, option, fallback):
+            s = self.config.get(section, option, fallback=fallback)
+            # Формат: Статус1:WON,Статус2:NEW
+            items = [i.strip() for i in s.split(',') if i.strip()]
+            res = {}
+            for it in items:
+                if ':' in it:
+                    k, v = it.split(':', 1)
+                    res[k.strip()] = v.strip()
+            return res
+
+        mapping = _get_map('Bitrix24', 'stage_mapping', "Запланирован:NEW,Пациент пришел:NEW,В процессе:UC_NO40X0,Завершен:UC_NO40X0,Завершен (счет выдан):WON,Отменен:LOSE")
+
+        finals = [s.strip() for s in self.config.get('Bitrix24', 'final_stages', fallback='WON,LOSE').split(',') if s.strip()]
+        protected = [s.strip() for s in self.config.get('Bitrix24', 'protected_stages', fallback='PREPAYMENT_INVOICE,FINAL_INVOICE,EXECUTING,APOLOGY').split(',') if s.strip()]
+
+        return {
+            'mapping': mapping,
+            'finals': finals,
+            'protected': protected,
         }
 
     def get_sync_config(self) -> Dict[str, Any]:

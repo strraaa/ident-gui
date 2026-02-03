@@ -352,14 +352,20 @@ class Bitrix24Client:
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def create_contact(self, contact_data: Dict[str, Any]) -> int:
         """Создает новый контакт"""
+        from src.config.config_manager_v2 import get_config
+        field_map = get_config().get_bitrix_field_map()
+
+        contact_card = field_map.get('contact_card_number', 'UF_CRM_1769083788971')
+        contact_parent = field_map.get('contact_parent', 'UF_CRM_1769087537061')
+
         fields = {
             'NAME': contact_data.get('name', ''),
             'LAST_NAME': contact_data.get('last_name', ''),
             'SECOND_NAME': contact_data.get('second_name', ''),
             'TYPE_ID': contact_data.get('type_id', 'CLIENT'),
             'PHONE': [{'VALUE': contact_data['phone'], 'VALUE_TYPE': 'MOBILE'}],
-            'UF_CRM_1769083788971': contact_data.get('UF_CRM_1769083788971', ''),
-            'UF_CRM_1769087537061': contact_data.get('UF_CRM_1769087537061', '')
+            contact_card: contact_data.get(contact_card, ''),
+            contact_parent: contact_data.get(contact_parent, '')
         }
 
         if self.default_assigned_by_id:
@@ -378,11 +384,15 @@ class Bitrix24Client:
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deal_by_ident_id(self, ident_id: str) -> Optional[Dict[str, Any]]:
         """Ищет сделку по IDENT ID"""
+        from src.config.config_manager_v2 import get_config
+        field_map = get_config().get_bitrix_field_map()
+        ident_field = field_map.get('ident_field', 'UF_CRM_1769072841035')
+
         result = self._make_request(
             'crm.deal.list',
             {
-                'filter': {'UF_CRM_1769072841035': ident_id},
-                'select': ['ID', 'STAGE_ID', 'CONTACT_ID', 'UF_CRM_1769072841035']
+                'filter': {ident_field: ident_id},
+                'select': ['ID', 'STAGE_ID', 'CONTACT_ID', ident_field]
             }
         )
 
@@ -398,14 +408,18 @@ class Bitrix24Client:
         """Ищет сделки контакта без IDENT ID"""
         from src.transformer.data_transformer import StageMapper
 
+        from src.config.config_manager_v2 import get_config
+        field_map = get_config().get_bitrix_field_map()
+        ident_field = field_map.get('ident_field', 'UF_CRM_1769072841035')
+
         result = self._make_request(
             'crm.deal.list',
             {
                 'filter': {
                     'CONTACT_ID': contact_id,
-                    '=UF_CRM_1769072841035': False
+                    f'={ident_field}': False
                 },
-                'select': ['ID', 'STAGE_ID', 'DATE_CREATE', 'UF_CRM_1769072841035'],
+                'select': ['ID', 'STAGE_ID', 'DATE_CREATE', ident_field],
                 'order': {'DATE_CREATE': 'DESC'}
             }
         )
@@ -431,6 +445,24 @@ class Bitrix24Client:
         """
         try:
             # Формируем поля
+            from src.config.config_manager_v2 import get_config
+            field_map = get_config().get_bitrix_field_map()
+
+            deal_start_field = field_map.get('deal_start', 'UF_CRM_1769008900')
+            deal_end_field = field_map.get('deal_end', 'UF_CRM_1769008947')
+            deal_doctor_field = field_map.get('deal_doctor', 'UF_CRM_1769008996')
+            deal_services_field = field_map.get('deal_services', 'UF_CRM_1769009098')
+            deal_status_field = field_map.get('deal_status', 'UF_CRM_1769009157')
+            deal_card_field = field_map.get('deal_card_number', 'UF_CRM_1769083581481')
+            deal_parent_field = field_map.get('deal_parent', 'UF_CRM_1769087458477')
+            deal_comment_field = field_map.get('deal_comment', 'UF_CRM_1769494714842')
+            ident_field = field_map.get('ident_field', 'UF_CRM_1769072841035')
+            filial_field = field_map.get('filial', 'UF_CRM_FILIAL')
+            armchair_field = field_map.get('armchair', 'UF_CRM_ARMCHAIR')
+            status_field = field_map.get('status_field', 'UF_CRM_STATUS')
+            treatment_plan_field = field_map.get('treatment_plan', 'UF_CRM_1769167266723')
+            treatment_plan_hash_field = field_map.get('treatment_plan_hash', 'UF_CRM_1769167398642')
+
             fields = {
                 'TITLE': deal_data.get('title', 'Сделка'),
                 'STAGE_ID': deal_data.get('stage_id', 'NEW'),
@@ -438,28 +470,28 @@ class Bitrix24Client:
                 'OPPORTUNITY': deal_data.get('opportunity', 0),
                 'CURRENCY_ID': deal_data.get('currency_id', 'RUB'),
 
-                # Кастомные поля (актуальные ID из Bitrix24)
-                'UF_CRM_1769008900': deal_data.get('UF_CRM_1769008900'),  # Дата начало приема
-                'UF_CRM_1769008947': deal_data.get('UF_CRM_1769008947'),  # Дата окончания приема
-                'UF_CRM_1769008996': deal_data.get('UF_CRM_1769008996'),  # Врач
-                'UF_CRM_1769009098': deal_data.get('UF_CRM_1769009098'),  # Услуги
-                'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
-                'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
-                'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
-                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  #  Комментарий из IDENT
+                # Кастомные поля (из конфига)
+                deal_start_field: deal_data.get(deal_start_field),  # Дата начало приема
+                deal_end_field: deal_data.get(deal_end_field),  # Дата окончания приема
+                deal_doctor_field: deal_data.get(deal_doctor_field),  # Врач
+                deal_services_field: deal_data.get(deal_services_field),  # Услуги
+                deal_status_field: deal_data.get(deal_status_field),  # Статус записи
+                deal_card_field: deal_data.get(deal_card_field),  # Номер карты пациента
+                deal_parent_field: deal_data.get(deal_parent_field),  # Родитель/Опекун
+                deal_comment_field: deal_data.get(deal_comment_field),  #  Комментарий из IDENT
 
                 # Дополнительные поля (для внутреннего использования)
-                'UF_CRM_1769072841035': deal_data.get('uf_crm_ident_id'),  # ID из Ident
-                'UF_CRM_FILIAL': deal_data.get('uf_crm_filial'),
-                'UF_CRM_ARMCHAIR': deal_data.get('uf_crm_armchair'),
-                'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
+                ident_field: deal_data.get('uf_crm_ident_id'),  # ID из Ident
+                filial_field: deal_data.get('uf_crm_filial'),
+                armchair_field: deal_data.get('uf_crm_armchair'),
+                status_field: deal_data.get('uf_crm_status'),
                 'UF_CRM_CARD_NUMBER': deal_data.get('uf_crm_card_number'),
                 'UF_CRM_ORDER_DATE': deal_data.get('uf_crm_order_date'),
                 'UF_CRM_DOCTOR_SPECIALITY': deal_data.get('uf_crm_doctor_speciality'),
 
                 # План лечения
-                'UF_CRM_1769167266723': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
-                'UF_CRM_1769167398642': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
+                treatment_plan_field: deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
+                treatment_plan_hash_field: deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
 
             # Устанавливаем ответственного если указан в конфиге
@@ -501,28 +533,44 @@ class Bitrix24Client:
         """
         try:
             # Формируем поля (аналогично create_deal)
+            from src.config.config_manager_v2 import get_config
+            field_map = get_config().get_bitrix_field_map()
+
+            deal_start_field = field_map.get('deal_start', 'UF_CRM_1769008900')
+            deal_end_field = field_map.get('deal_end', 'UF_CRM_1769008947')
+            deal_doctor_field = field_map.get('deal_doctor', 'UF_CRM_1769008996')
+            deal_services_field = field_map.get('deal_services', 'UF_CRM_1769009098')
+            deal_status_field = field_map.get('deal_status', 'UF_CRM_1769009157')
+            deal_card_field = field_map.get('deal_card_number', 'UF_CRM_1769083581481')
+            deal_parent_field = field_map.get('deal_parent', 'UF_CRM_1769087458477')
+            deal_comment_field = field_map.get('deal_comment', 'UF_CRM_1769494714842')
+            ident_field = field_map.get('ident_field', 'UF_CRM_1769072841035')
+            status_field = field_map.get('status_field', 'UF_CRM_STATUS')
+            treatment_plan_field = field_map.get('treatment_plan', 'UF_CRM_1769167266723')
+            treatment_plan_hash_field = field_map.get('treatment_plan_hash', 'UF_CRM_1769167398642')
+
             fields = {
                 'TITLE': deal_data.get('title'),
                 'STAGE_ID': deal_data.get('stage_id'),
                 'OPPORTUNITY': deal_data.get('opportunity'),
 
-                # Кастомные поля (актуальные ID из Bitrix24)
-                'UF_CRM_1769008900': deal_data.get('UF_CRM_1769008900'),  # Дата начало приема
-                'UF_CRM_1769008947': deal_data.get('UF_CRM_1769008947'),  # Дата окончания приема
-                'UF_CRM_1769008996': deal_data.get('UF_CRM_1769008996'),  # Врач
-                'UF_CRM_1769009098': deal_data.get('UF_CRM_1769009098'),  # Услуги
-                'UF_CRM_1769009157': deal_data.get('UF_CRM_1769009157'),  # Статус записи
-                'UF_CRM_1769083581481': deal_data.get('UF_CRM_1769083581481'),  # Номер карты пациента
-                'UF_CRM_1769087458477': deal_data.get('UF_CRM_1769087458477'),  # Родитель/Опекун
-                'UF_CRM_1769494714842': deal_data.get('UF_CRM_1769494714842'),  #  Комментарий из IDENT
+                # Кастомные поля (из конфига)
+                deal_start_field: deal_data.get(deal_start_field),  # Дата начало приема
+                deal_end_field: deal_data.get(deal_end_field),  # Дата окончания приема
+                deal_doctor_field: deal_data.get(deal_doctor_field),  # Врач
+                deal_services_field: deal_data.get(deal_services_field),  # Услуги
+                deal_status_field: deal_data.get(deal_status_field),  # Статус записи
+                deal_card_field: deal_data.get(deal_card_field),  # Номер карты пациента
+                deal_parent_field: deal_data.get(deal_parent_field),  # Родитель/Опекун
+                deal_comment_field: deal_data.get(deal_comment_field),  #  Комментарий из IDENT
 
                 # Дополнительные поля (для внутреннего использования)
-                'UF_CRM_1769072841035': deal_data.get('uf_crm_ident_id'),  # ID из Ident
-                'UF_CRM_STATUS': deal_data.get('uf_crm_status'),
+                ident_field: deal_data.get('uf_crm_ident_id'),  # ID из Ident
+                status_field: deal_data.get('uf_crm_status'),
 
                 # План лечения
-                'UF_CRM_1769167266723': deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
-                'UF_CRM_1769167398642': deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
+                treatment_plan_field: deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
+                treatment_plan_hash_field: deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
 
             # ИСПРАВЛЕНИЕ: Удаляем None и пустые строки (бесполезные для Bitrix24)
@@ -548,7 +596,9 @@ class Bitrix24Client:
             )
 
             # Логируем ключевые поля для диагностики "пустых" обновлений
-            key_fields = ['TITLE', 'STAGE_ID', 'OPPORTUNITY', 'UF_CRM_1769008900', 'UF_CRM_1769008996']
+            from src.config.config_manager_v2 import get_config
+            fm = get_config().get_bitrix_field_map()
+            key_fields = ['TITLE', 'STAGE_ID', 'OPPORTUNITY', fm.get('deal_start', 'UF_CRM_1769008900'), fm.get('deal_doctor', 'UF_CRM_1769008996')]
             key_values = {k: fields.get(k, '<отсутствует>') for k in key_fields if k in fields}
             if key_values:
                 logger.debug(f"Ключевые поля сделки {deal_id}: {key_values}")
@@ -695,7 +745,9 @@ class Bitrix24Client:
             # Формируем batch команды для текущего чанка
             commands = {}
             for ident_id in chunk:
-                commands[ident_id] = f"crm.deal.list?filter[UF_CRM_1769072841035]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]=UF_CRM_1769072841035"
+                from src.config.config_manager_v2 import get_config
+                ident_field = get_config().get_bitrix_field_map().get('ident_field', 'UF_CRM_1769072841035')
+                commands[ident_id] = f"crm.deal.list?filter[{ident_field}]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]={ident_field}"
 
             results = self.batch_execute(commands)
 

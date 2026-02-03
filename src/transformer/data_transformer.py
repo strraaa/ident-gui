@@ -200,31 +200,29 @@ class ServicesAggregator:
 
 
 class StageMapper:
-    """Определение стадии воронки продаж"""
+    """Определение стадии воронки продаж (берёт значения из конфига при необходимости)"""
 
-    # Маппинг статусов → стадии (актуальные стадии из Bitrix24)
-    STAGE_MAPPING = {
-        'Запланирован': 'NEW',              # Запись на консультацию
-        'Пациент пришел': 'NEW',            # Запись на консультацию
-        'В процессе': 'UC_NO40X0',          # Лечение (изменено с PREPARATION)
-        'Завершен': 'UC_NO40X0',            # Лечение
-        'Завершен (счет выдан)': 'WON',     # Сделка успешна
-        'Отменен': 'LOSE'                   # Сделка провалена
-    }
+    @staticmethod
+    def _get_stage_config():
+        from src.config.config_manager_v2 import get_config
+        cfg = get_config()
+        stage_cfg = cfg.get_stage_config()
+        return stage_cfg['mapping'], stage_cfg['finals'], stage_cfg['protected']
 
-    # Финальные стадии (закрытые сделки) - НЕ обновляем
-    FINAL_STAGES = [
-        'WON',   # Сделка успешна
-        'LOSE'   # Сделка провалена
-    ]
+    @staticmethod
+    def _get_stage_mapping() -> dict:
+        mapping, _, _ = StageMapper._get_stage_config()
+        return mapping
 
-    # Стадии, защищенные от автоизменения (ручные стадии менеджера)
-    PROTECTED_STAGES = [
-        'PREPAYMENT_INVOICE',  # Презентация плана лечения
-        'FINAL_INVOICE',       # Получена предоплата
-        'EXECUTING',           # Лист ожидания
-        'APOLOGY'              # Анализ причины провала
-    ]
+    @staticmethod
+    def _get_final_stages() -> list:
+        _, finals, _ = StageMapper._get_stage_config()
+        return finals
+
+    @staticmethod
+    def _get_protected_stages() -> list:
+        _, _, protected = StageMapper._get_stage_config()
+        return protected
 
     @staticmethod
     def _normalize_status(status: str) -> str:
@@ -260,7 +258,7 @@ class StageMapper:
             - Иначе → определяем по статусу
         """
         # Защищаем ручные стадии от автоизменения
-        if current_stage and current_stage in StageMapper.PROTECTED_STAGES:
+        if current_stage and current_stage in StageMapper._get_protected_stages():
             logger.info(f"Стадия {current_stage} защищена от автоизменения")
             return current_stage
 
@@ -268,19 +266,20 @@ class StageMapper:
         norm = StageMapper._normalize_status(status)
 
         # Попробуем точное соответствие по нормализованным ключам
-        for key, stage in StageMapper.STAGE_MAPPING.items():
+        for key, stage in StageMapper._get_stage_mapping().items():
             if StageMapper._normalize_status(key) == norm:
                 return stage
 
         # Частичное совпадение (например, 'завершено(счет выставлен)')
         if 'счет выдан' in norm or ('счет' in norm and 'выдан' in norm):
-            return 'WON'
+            # если в конфиге есть явная стадия для 'WON', используем её, иначе 'WON'
+            return StageMapper._get_stage_mapping().get('Завершен (счет выдан)', 'WON')
 
         if 'завершен' in norm or 'завершено' in norm:
-            return 'UC_NO40X0'
+            return StageMapper._get_stage_mapping().get('Завершен', 'UC_NO40X0')
 
-        # По умолчанию NEW
-        return 'NEW'
+        # По умолчанию — если в маппинге есть 'Запланирован', используем, иначе 'NEW'
+        return StageMapper._get_stage_mapping().get('Запланирован', 'NEW')
 
     @staticmethod
     def is_stage_protected(stage_id: Optional[str]) -> bool:
@@ -300,8 +299,8 @@ class StageMapper:
         if not stage_id:
             return False
 
-        return (stage_id in StageMapper.FINAL_STAGES or
-                stage_id in StageMapper.PROTECTED_STAGES)
+        return (stage_id in StageMapper._get_final_stages() or
+                stage_id in StageMapper._get_protected_stages())
 
     @staticmethod
     def is_stage_final(stage_id: Optional[str]) -> bool:
@@ -314,7 +313,7 @@ class StageMapper:
         Returns:
             True если стадия финальная (WON или LOSE)
         """
-        return stage_id in StageMapper.FINAL_STAGES if stage_id else False
+        return stage_id in StageMapper._get_final_stages() if stage_id else False
 
 
 class ReceptionValidator:
@@ -451,7 +450,22 @@ class DataTransformer:
             # Для int/float используем обычное преобразование
             opportunity_value = float(amount)
 
-        # Формирование данных для Bitrix24
+        # Формирование данных для Bitrix24 (используем маппинг полей из конфига)
+        from src.config.config_manager_v2 import get_config
+        field_map = get_config().get_bitrix_field_map()
+
+        contact_card_field = field_map.get('contact_card_number', 'UF_CRM_1769083788971')
+        contact_parent_field = field_map.get('contact_parent', 'UF_CRM_1769087537061')
+
+        deal_start_field = field_map.get('deal_start', 'UF_CRM_1769008900')
+        deal_end_field = field_map.get('deal_end', 'UF_CRM_1769008947')
+        deal_doctor_field = field_map.get('deal_doctor', 'UF_CRM_1769008996')
+        deal_services_field = field_map.get('deal_services', 'UF_CRM_1769009098')
+        deal_status_field = field_map.get('deal_status', 'UF_CRM_1769009157')
+        deal_card_field = field_map.get('deal_card_number', 'UF_CRM_1769083581481')
+        deal_parent_field = field_map.get('deal_parent', 'UF_CRM_1769087458477')
+        deal_comment_field = field_map.get('deal_comment', 'UF_CRM_1769494714842')
+
         transformed = {
             # Идентификаторы
             'unique_id': unique_id,
@@ -465,8 +479,8 @@ class DataTransformer:
                 'second_name': reception.get('PatientPatronymic', ''),
                 'phone': normalized_phone,
                 'type_id': 'CLIENT',  # Тип контакта - клиент
-                'UF_CRM_1769083788971': reception.get('CardNumber', ''),  # Номер карты пациента
-                'UF_CRM_1769087537061': reception.get('ParentFullName', '')  # Родитель/Опекун
+                contact_card_field: reception.get('CardNumber', ''),  # Номер карты пациента
+                contact_parent_field: reception.get('ParentFullName', '')  # Родитель/Опекун
             },
 
             # Сделка
@@ -476,15 +490,15 @@ class DataTransformer:
                 'opportunity': opportunity_value,  # Сумма (безопасно преобразовано из Decimal)
                 'currency_id': 'RUB',
 
-                # Кастомные поля (актуальные ID из Bitrix24)
-                'UF_CRM_1769008900': start_time_iso,        # Дата начало приема
-                'UF_CRM_1769008947': end_time_iso,          # Дата окончания приема
-                'UF_CRM_1769008996': reception['DoctorFullName'],  # Врач
-                'UF_CRM_1769009098': services,              # Услуги
-                'UF_CRM_1769009157': reception.get('Status', 'Запланирован'),  # Статус записи
-                'UF_CRM_1769083581481': reception.get('CardNumber', ''),  # Номер карты пациента
-                'UF_CRM_1769087458477': reception.get('ParentFullName', ''),  # Родитель/Опекун
-                'UF_CRM_1769494714842': reception.get('Comment', ''),  # Комментарий из IDENT
+                # Кастомные поля (из конфига)
+                deal_start_field: start_time_iso,        # Дата начало приема
+                deal_end_field: end_time_iso,          # Дата окончания приема
+                deal_doctor_field: reception['DoctorFullName'],  # Врач
+                deal_services_field: services,              # Услуги
+                deal_status_field: reception.get('Status', 'Запланирован'),  # Статус записи
+                deal_card_field: reception.get('CardNumber', ''),  # Номер карты пациента
+                deal_parent_field: reception.get('ParentFullName', ''),  # Родитель/Опекун
+                deal_comment_field: reception.get('Comment', ''),  # Комментарий из IDENT
 
                 # Дополнительная информация (в комментарии)
                 'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)
