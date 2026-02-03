@@ -66,18 +66,24 @@ class ConfigManager:
         ('Sync', 'filial_id', 'ID филиала')
     ]
 
-    def __init__(self, config_path: str = "config.ini"):
+    def __init__(self, config_path: str = "config.ini", require_config: bool = False):
         """
         Инициализация менеджера конфигурации
 
         Args:
             config_path: Путь к файлу конфигурации
+            require_config: Если True — требуем наличия `config.ini` в указанном пути,
+                            даже если есть `config.example.ini` (useful for production)
 
         Raises:
             FileNotFoundError: Если файл конфигурации не найден
             ConfigValidationError: Если конфигурация невалидна
         """
         self.config_path = Path(config_path)
+
+        # Allow environment to enforce requiring config.ini in production
+        env_require = os.environ.get('IDENT_REQUIRE_CONFIG', '').lower() in ('1', 'true', 'yes') or os.environ.get('IDENT_ENV', '').lower() == 'production'
+        self.require_config = require_config or env_require
 
         self.config = configparser.ConfigParser(interpolation=None)
 
@@ -97,6 +103,11 @@ class ConfigManager:
         if self.config_path.exists():
             files_to_read.append(str(self.config_path))
         else:
+            if self.require_config:
+                # В режиме production требуем наличия config.ini — это критическая ошибка
+                raise FileNotFoundError(
+                    f"Требуется файл конфигурации: {self.config_path} (IDENT_REQUIRE_CONFIG=1 или IDENT_ENV=production)")
+
             if not files_to_read:
                 # Ни config.ini ни config.example.ini не найдены - критическая ошибка
                 raise FileNotFoundError(
@@ -490,12 +501,13 @@ class ConfigManager:
 _config_instance: Optional[ConfigManager] = None
 
 
-def get_config(config_path: str = "config.ini") -> ConfigManager:
+def get_config(config_path: str = "config.ini", require_config: bool = False) -> ConfigManager:
     """
     Получает singleton экземпляр ConfigManager
 
     Args:
         config_path: Путь к файлу конфигурации
+        require_config: Если True — требуем наличия `config.ini` (production mode)
 
     Returns:
         Экземпляр ConfigManager
@@ -503,7 +515,7 @@ def get_config(config_path: str = "config.ini") -> ConfigManager:
     global _config_instance
 
     if _config_instance is None:
-        _config_instance = ConfigManager(config_path)
+        _config_instance = ConfigManager(config_path, require_config=require_config)
 
     return _config_instance
 
