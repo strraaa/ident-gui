@@ -227,6 +227,23 @@ class StageMapper:
     ]
 
     @staticmethod
+    def _normalize_status(status: str) -> str:
+        """Нормализует строку статуса для устойчивого сопоставления"""
+        if not status:
+            return ''
+        s = status.strip().lower()
+        # Убираем лишние пробелы и нормализуем скобки/знаковые варианты
+        s = s.replace('\xa0', ' ')
+        s = s.replace('\u200f', '')
+        s = s.replace('ё', 'е')
+        # Упрощаем: заменим несколько вариантов формулировок
+        s = s.replace('счет выставлен', 'счет выдан')
+        s = s.replace('счёт выставлен', 'счет выдан')
+        # Уберём пробелы вокруг скобок
+        s = s.replace('(', ' (').replace(')', ')').replace('  ', ' ')
+        return s
+
+    @staticmethod
     def get_stage(status: str, current_stage: Optional[str] = None) -> str:
         """
         Определяет стадию воронки на основе статуса записи
@@ -247,10 +264,23 @@ class StageMapper:
             logger.info(f"Стадия {current_stage} защищена от автоизменения")
             return current_stage
 
-        # Определяем новую стадию
-        new_stage = StageMapper.STAGE_MAPPING.get(status, 'NEW')
+        # Нормализуем статус и ищем в карте с более устойчивым сравнением
+        norm = StageMapper._normalize_status(status)
 
-        return new_stage
+        # Попробуем точное соответствие по нормализованным ключам
+        for key, stage in StageMapper.STAGE_MAPPING.items():
+            if StageMapper._normalize_status(key) == norm:
+                return stage
+
+        # Частичное совпадение (например, 'завершено(счет выставлен)')
+        if 'счет выдан' in norm or ('счет' in norm and 'выдан' in norm):
+            return 'WON'
+
+        if 'завершен' in norm or 'завершено' in norm:
+            return 'UC_NO40X0'
+
+        # По умолчанию NEW
+        return 'NEW'
 
     @staticmethod
     def is_stage_protected(stage_id: Optional[str]) -> bool:

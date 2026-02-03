@@ -14,6 +14,8 @@
 
 import pyodbc
 import time
+import random
+import weakref
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Generator
 from contextlib import contextmanager
@@ -30,33 +32,60 @@ logger = get_logger('ident_integration')
 class ConnectionPool:
     """Thread-safe пул соединений для переиспользования"""
 
-    def __init__(self, connection_string: str, pool_size: int = 1, max_lifetime: int = 3600):
+    def __init__(
+        self,
+        connection_string: str,
+        pool_size: int = 1,
+        max_lifetime: int = 3600,
+        health_check_interval: int = 60,
+        pool_get_timeout: int = 10,
+    ):
         """
         ✅ ОПТИМИЗАЦИЯ: Уменьшен pool_size с 3 до 1 для экономии памяти
         (каждое соединение ~ 3MB RAM)
+
+        Новые параметры:
+        - health_check_interval: минимальный интервал между health-check для одного соединения (сек)
+        - pool_get_timeout: таймаут ожидания свободного соединения из пула (сек)
         """
         self.connection_string = connection_string
         self.pool_size = pool_size
         self.max_lifetime = max_lifetime  # Максимальное время жизни соединения (сек)
         self.pool = Queue(maxsize=pool_size)
-        self.connection_times = {}  # Время создания каждого соединения
-        self.lock = threading.Lock()
-        self.last_health_check = 0  # ✅ ОПТИМИЗАЦИЯ: Кеш для health check
 
-        # Предварительно создаем соединения
+        # Метаданные о соединениях (под защитой self.lock)
+        # connection_times: conn_id -> creation_time
+        # connection_last_check: conn_id -> last_health_check_time
+        self.connection_times: Dict[int, float] = {}
+        self.connection_last_check: Dict[int, float] = {}
+
+        self.lock = threading.RLock()
+        self.health_check_interval = health_check_interval
+        self.pool_get_timeout = pool_get_timeout
+        self._shutting_down = False
+
+        # Предварительно создаем соединения (без падений; если что-то идёт не так - логируем и продолжаем)
         for _ in range(pool_size):
-            conn = self._create_connection()
-            self.pool.put(conn)
+            try:
+                conn = self._create_connection()
+                self.pool.put(conn)
+            except Exception as e:
+                logger.error(f"Не удалось создать соединение при инициализации пула: {e}", exc_info=True)
+                # Не прерываем инициализацию, оставим пул частичным; ошибки будут проявляться позже при запросах
+                break
 
     def _create_connection(self) -> pyodbc.Connection:
-        """Создает новое соединение"""
+        """Создает новое соединение и регистрирует метаданные"""
         conn = pyodbc.connect(self.connection_string)
         conn_id = id(conn)
-        self.connection_times[conn_id] = time.time()
+        now = time.time()
+        with self.lock:
+            self.connection_times[conn_id] = now
+            self.connection_last_check[conn_id] = now
         return conn
 
     def _is_connection_alive(self, conn: pyodbc.Connection) -> bool:
-        """Проверяет живо ли соединение"""
+        """Проверяет живо ли соединение (легкая проверка)"""
         try:
             cursor = conn.cursor()
             cursor.execute("SELECT 1")
@@ -69,91 +98,147 @@ class ConnectionPool:
     def _is_connection_expired(self, conn: pyodbc.Connection) -> bool:
         """Проверяет не истек ли срок жизни соединения"""
         conn_id = id(conn)
-        if conn_id not in self.connection_times:
-            return True
+        with self.lock:
+            if conn_id not in self.connection_times:
+                return True
 
-        age = time.time() - self.connection_times[conn_id]
+            age = time.time() - self.connection_times[conn_id]
         return age > self.max_lifetime
 
     @contextmanager
     def get_connection(self):
         """
-        ✅ ОПТИМИЗАЦИЯ: Health check только раз в минуту (вместо каждого запроса)
-        Экономия: ~1000 лишних SELECT 1 при обработке 1000 записей
+        Получает соединение из пула с per-connection health-check и защитой от shutdown.
         """
+        if self._shutting_down:
+            raise RuntimeError("Connection pool is shutting down; cannot get new connections")
+
         conn = None
         try:
             # Получаем соединение из пула
             try:
-                conn = self.pool.get(timeout=10)
+                conn = self.pool.get(timeout=self.pool_get_timeout)
             except Empty:
-                raise RuntimeError("Connection pool exhausted. Не удалось получить соединение за 10 секунд.")
+                raise RuntimeError(f"Connection pool exhausted. Не удалось получить соединение за {self.pool_get_timeout} секунд.")
 
-            # Проверяем соединение ТОЛЬКО раз в 60 секунд (не на каждый запрос)
+            conn_id = id(conn)
             now = time.time()
-            should_check = (now - self.last_health_check) > 60
 
-            if should_check:
-                if not self._is_connection_alive(conn) or self._is_connection_expired(conn):
-                    logger.info("Соединение умерло или истекло, создаем новое")
+            # Проверяем состояние и здоровье конкретного соединения под lock
+            do_check = False
+            with self.lock:
+                last_check = self.connection_last_check.get(conn_id, 0)
+                if (now - last_check) > self.health_check_interval:
+                    do_check = True
+                    # Обновляем момент проверки заранее, чтобы избежать thundering herd
+                    self.connection_last_check[conn_id] = now
+
+            if do_check:
+                try:
+                    if not self._is_connection_alive(conn) or self._is_connection_expired(conn):
+                        logger.info("Соединение умерло или истекло, создаем новое")
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+
+                        with self.lock:
+                            # Удаляем старые метаданные
+                            cid = id(conn)
+                            self.connection_times.pop(cid, None)
+                            self.connection_last_check.pop(cid, None)
+
+                        # Создаем новое
+                        conn = self._create_connection()
+                except Exception:
+                    # Если check упал — заменим соединение безопасно и продолжим
                     try:
                         conn.close()
                     except Exception:
                         pass
-
-                    # Удаляем из словаря времен
-                    conn_id = id(conn)
-                    if conn_id in self.connection_times:
-                        del self.connection_times[conn_id]
-
-                    # Создаем новое
                     conn = self._create_connection()
-
-                self.last_health_check = now
 
             yield conn
 
-        except Exception as e:
-            # Если ошибка при работе с соединением - помечаем его как мертвое
+        except Exception:
+            # При исключении — помечаем текущее соединение как мёртвое (если есть)
             if conn:
-                # ИСПРАВЛЕНИЕ: Удаляем старое мертвое соединение из словаря времен (предотвращение memory leak)
-                old_conn_id = id(conn)
-                if old_conn_id in self.connection_times:
-                    del self.connection_times[old_conn_id]
+                try:
+                    cid = id(conn)
+                    with self.lock:
+                        self.connection_times.pop(cid, None)
+                        self.connection_last_check.pop(cid, None)
+                except Exception:
+                    pass
 
                 try:
                     conn.close()
                 except Exception:
                     pass
 
-                # Создаем новое взамен
-                conn = self._create_connection()
+                # Попытаемся создать новое соединение и вернуть его в пул
+                try:
+                    conn = self._create_connection()
+                except Exception:
+                    conn = None
 
             raise
 
         finally:
-            # Возвращаем соединение в пул
-            if conn:
-                self.pool.put(conn)
-
-    def close_all(self):
-        """Закрывает все соединения в пуле"""
-        while not self.pool.empty():
+            # Возвращаем соединение в пул (если не shutting down и соединение существует)
             try:
-                conn = self.pool.get_nowait()
-                conn.close()
+                if conn and not self._shutting_down:
+                    self.pool.put(conn)
+                else:
+                    if conn:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
+    def close_all(self, wait_timeout: float = 30.0):
+        """Закрывает все соединения в пуле.
 
-def retry_on_db_error(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0):
+        Ждём, пока все соединения вернутся в пул (up to wait_timeout), затем закрываем их.
+        """
+        # Помечаем пул как закрывающийся, чтобы новые запросы не получали соединения
+        self._shutting_down = True
+
+        start = time.time()
+        # Ждём пока все соединения будут в пуле
+        while (time.time() - start) < wait_timeout and self.pool.qsize() < self.pool_size:
+            time.sleep(0.05)
+
+        # Теперь достаём и закрываем все доступные соединения
+        while not self.pool.empty():
+            try:
+                conn = self.pool.get_nowait()
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            except Exception:
+                break
+
+        # Сбрасываем метаданные
+        with self.lock:
+            self.connection_times.clear()
+            self.connection_last_check.clear()
+
+        self._shutting_down = False
+
+
+def retry_on_db_error(max_attempts: int = 3, delay: float = 1.0, backoff: float = 2.0, jitter: float = 0.2):
     """
-    Декоратор для retry при временных ошибках БД
+    Декоратор для retry при временных ошибках БД с экспоненциальным backoff и jitter.
 
     Args:
         max_attempts: Максимальное количество попыток
         delay: Начальная задержка в секундах
         backoff: Множитель для экспоненциальной задержки
+        jitter: Доля случайного джиттера (например, 0.2 -> ±20%)
     """
     def decorator(func):
         @wraps(func)
@@ -165,7 +250,7 @@ def retry_on_db_error(max_attempts: int = 3, delay: float = 1.0, backoff: float 
                 try:
                     return func(*args, **kwargs)
 
-                except pyodbc.Error as e:
+                except (pyodbc.Error, OSError) as e:
                     # Коды временных ошибок SQL Server
                     retryable_codes = [
                         '08S01',  # Communication link failure
@@ -177,16 +262,18 @@ def retry_on_db_error(max_attempts: int = 3, delay: float = 1.0, backoff: float 
                         '40613',  # Database unavailable
                     ]
 
-                    error_code = e.args[0] if e.args else None
-                    is_retryable = any(code in str(e) for code in retryable_codes)
+                    error_text = str(e)
+                    is_retryable = any(code in error_text for code in retryable_codes) or isinstance(e, OSError)
 
                     if is_retryable and attempt < max_attempts - 1:
                         attempt += 1
+                        # jitter
+                        jitter_factor = 1 + random.uniform(-jitter, jitter)
+                        sleep_time = current_delay * jitter_factor
                         logger.warning(
-                            f"БД ошибка (код: {error_code}), попытка {attempt}/{max_attempts} "
-                            f"через {current_delay:.1f}с: {e}"
+                            f"БД ошибка (попытка {attempt}/{max_attempts}), сплю {sleep_time:.1f}s (отрегулированный backoff): {e}"
                         )
-                        time.sleep(current_delay)
+                        time.sleep(sleep_time)
                         current_delay *= backoff
                     else:
                         # Не временная ошибка или исчерпаны попытки
@@ -1117,11 +1204,22 @@ class IdentConnector:
             raise RuntimeError(f"Ошибка при получении статистики БД: {e}") from e
 
     def close(self):
-        """Закрывает все соединения в пуле"""
-        self.pool.close_all()
+        """Закрывает все соединения в пуле явно"""
+        try:
+            self.pool.close_all()
+        finally:
+            self.pool = None
+            self._closed = True
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+    # Регистрируем финализатор для безопасности (вызовет close при сборке мусора)
+    # Также оставляем __del__ для совместимости, но рекомендуем вызывать close() явно
     def __del__(self):
-        """Деструктор - закрываем пул при удалении объекта"""
         try:
             self.close()
         except Exception:
