@@ -52,17 +52,16 @@ class ConfigManager:
     ENCRYPTED_FIELDS = [
         ('Database', 'password'),
         ('Bitrix24', 'token'),
+        ('bitrix', 'token'),
         ('Notifications', 'smtp_password')
     ]
 
-    # Обязательные поля для проверки
+    # Обязательные поля для проверки (Bitrix секция определяется динамически)
     REQUIRED_FIELDS = [
         ('Database', 'server', 'Адрес сервера БД'),
         ('Database', 'database', 'Имя базы данных'),
         ('Database', 'username', 'Имя пользователя БД'),
         ('Database', 'password', 'Пароль БД'),
-        ('Bitrix24', 'webhook_url', 'URL webhook Битрикс24'),
-        ('Bitrix24', 'token', 'Токен webhook'),
         ('Sync', 'filial_id', 'ID филиала')
     ]
 
@@ -138,6 +137,14 @@ class ConfigManager:
 
         logger.info(f"Конфигурация загружена из {self.config_path}")
 
+    def _get_bitrix_section(self) -> Optional[str]:
+        """Определяет секцию конфигурации Bitrix24."""
+        if self.config.has_section('bitrix'):
+            return 'bitrix'
+        if self.config.has_section('Bitrix24'):
+            return 'Bitrix24'
+        return None
+
     def _check_file_permissions(self):
         """
         Проверяет права доступа к файлу конфигурации
@@ -182,6 +189,22 @@ class ConfigManager:
             if not value:
                 errors.append(f"Пустое значение [{section}].{option} ({description})")
 
+        # 1.1 Проверка обязательных полей Bitrix (секция может быть [bitrix] или [Bitrix24])
+        bitrix_section = self._get_bitrix_section()
+        if not bitrix_section:
+            errors.append("Отсутствует секция [bitrix] или [Bitrix24]")
+        else:
+            for option, description in [
+                ('webhook_url', 'URL webhook Битрикс24'),
+                ('token', 'Токен webhook')
+            ]:
+                if not self.config.has_option(bitrix_section, option):
+                    errors.append(f"Отсутствует параметр [{bitrix_section}].{option} ({description})")
+                else:
+                    value = self.config.get(bitrix_section, option, fallback='').strip()
+                    if not value:
+                        errors.append(f"Пустое значение [{bitrix_section}].{option} ({description})")
+
         # 2. Валидация типов и диапазонов
         try:
             # Database port
@@ -212,10 +235,34 @@ class ConfigManager:
             errors.append(f"Ошибка типа данных в конфигурации: {e}")
 
         # 3. Валидация URL webhook
-        if self.config.has_option('Bitrix24', 'webhook_url'):
-            webhook_url = self.config.get('Bitrix24', 'webhook_url')
+        if bitrix_section and self.config.has_option(bitrix_section, 'webhook_url'):
+            webhook_url = self.config.get(bitrix_section, 'webhook_url')
             if not webhook_url.startswith(('http://', 'https://')):
                 errors.append(f"Некорректный webhook_url: должен начинаться с http:// или https://")
+
+        # 3.1 Валидация Bitrix24-констант (стадии/поля)
+        required_sections = {
+            'contact_fields': ['card_number', 'parent_name'],
+            'deal_fields': [
+                'ident_id', 'start_time', 'end_time', 'doctor_name', 'services',
+                'status', 'card_number', 'parent_name', 'comment', 'filial',
+                'armchair', 'status_text', 'treatment_plan', 'treatment_plan_hash'
+            ],
+            'deal_defaults': ['default_stage_id'],
+            'deal_stages': ['mapping', 'final', 'protected'],
+            'pipelines': ['deal_category_id'],
+        }
+        for section, keys in required_sections.items():
+            if not self.config.has_section(section):
+                errors.append(f"Отсутствует секция [{section}] для Bitrix24")
+                continue
+            for key in keys:
+                if not self.config.has_option(section, key):
+                    errors.append(f"Отсутствует параметр [{section}].{key}")
+                else:
+                    value = self.config.get(section, key, fallback='').strip()
+                    if not value:
+                        errors.append(f"Пустое значение [{section}].{key}")
 
         # 4. Проверка DPAPI (только если зашифрованные значения реально используются)
         if not DPAPI_AVAILABLE:
@@ -417,44 +464,50 @@ class ConfigManager:
     def get_bitrix24_config(self) -> Dict[str, Any]:
         """Возвращает конфигурацию Битрикс24 с расшифрованным токеном"""
         # Читаем ID ответственного (может быть пустым)
-        assigned_by_id = self.config.get('Bitrix24', 'default_assigned_by_id', fallback='').strip()
+        section = self._get_bitrix_section()
+        if not section:
+            raise ConfigValidationError("?????? Bitrix24 ?? ??????? (????????? [bitrix] ??? [Bitrix24])")
+
+        assigned_by_id = self.config.get(section, 'default_assigned_by_id', fallback='').strip()
 
         return {
-            'webhook_url': self.config.get('Bitrix24', 'webhook_url'),
-            'token': self._get_decrypted('Bitrix24', 'token'),  # Расшифровиваем
-            'request_timeout': self.config.getint('Bitrix24', 'request_timeout', fallback=30),
-            'max_retries': self.config.getint('Bitrix24', 'max_retries', fallback=3),
+            'webhook_url': self.config.get(section, 'webhook_url'),
+            'token': self._get_decrypted(section, 'token'),  # Расшифровиваем
+            'request_timeout': self.config.getint(section, 'request_timeout', fallback=30),
+            'max_retries': self.config.getint(section, 'max_retries', fallback=3),
             'default_assigned_by_id': int(assigned_by_id) if assigned_by_id else None,
         }
 
     def get_bitrix_field_map(self) -> Dict[str, str]:
         """Возвращает маппинг логических имён полей → фактические UF_CRM имена"""
-        # Безопасные значения по-умолчанию (совпадают с текущим кодом)
         return {
-            'ident_field': self.config.get('Bitrix24', 'ident_field', fallback='UF_CRM_1769072841035'),
-            'contact_card_number': self.config.get('Bitrix24', 'contact_card_number', fallback='UF_CRM_1769083788971'),
-            'contact_parent': self.config.get('Bitrix24', 'contact_parent', fallback='UF_CRM_1769087537061'),
-            'deal_start': self.config.get('Bitrix24', 'deal_start_field', fallback='UF_CRM_1769008900'),
-            'deal_end': self.config.get('Bitrix24', 'deal_end_field', fallback='UF_CRM_1769008947'),
-            'deal_doctor': self.config.get('Bitrix24', 'deal_doctor_field', fallback='UF_CRM_1769008996'),
-            'deal_services': self.config.get('Bitrix24', 'deal_services_field', fallback='UF_CRM_1769009098'),
-            'deal_status': self.config.get('Bitrix24', 'deal_status_field', fallback='UF_CRM_1769009157'),
-            'deal_card_number': self.config.get('Bitrix24', 'deal_card_number_field', fallback='UF_CRM_1769083581481'),
-            'deal_parent': self.config.get('Bitrix24', 'deal_parent_field', fallback='UF_CRM_1769087458477'),
-            'deal_comment': self.config.get('Bitrix24', 'deal_comment_field', fallback='UF_CRM_1769494714842'),
-            'treatment_plan': self.config.get('Bitrix24', 'treatment_plan_field', fallback='UF_CRM_1769167266723'),
-            'treatment_plan_hash': self.config.get('Bitrix24', 'treatment_plan_hash_field', fallback='UF_CRM_1769167398642'),
-            'filial': self.config.get('Bitrix24', 'filial_field', fallback='UF_CRM_FILIAL'),
-            'armchair': self.config.get('Bitrix24', 'armchair_field', fallback='UF_CRM_ARMCHAIR'),
-            'status_field': self.config.get('Bitrix24', 'status_field', fallback='UF_CRM_STATUS'),
+            'ident_field': self.config.get('deal_fields', 'ident_id'),
+            'contact_card_number': self.config.get('contact_fields', 'card_number'),
+            'contact_parent': self.config.get('contact_fields', 'parent_name'),
+            'deal_start': self.config.get('deal_fields', 'start_time'),
+            'deal_end': self.config.get('deal_fields', 'end_time'),
+            'deal_doctor': self.config.get('deal_fields', 'doctor_name'),
+            'deal_services': self.config.get('deal_fields', 'services'),
+            'deal_status': self.config.get('deal_fields', 'status'),
+            'deal_card_number': self.config.get('deal_fields', 'card_number'),
+            'deal_parent': self.config.get('deal_fields', 'parent_name'),
+            'deal_comment': self.config.get('deal_fields', 'comment'),
+            'treatment_plan': self.config.get('deal_fields', 'treatment_plan'),
+            'treatment_plan_hash': self.config.get('deal_fields', 'treatment_plan_hash'),
+            'filial': self.config.get('deal_fields', 'filial'),
+            'armchair': self.config.get('deal_fields', 'armchair'),
+            'status_field': self.config.get('deal_fields', 'status_text'),
+            'legacy_card_number': self.config.get('deal_fields', 'legacy_card_number', fallback=''),
+            'order_date': self.config.get('deal_fields', 'order_date', fallback=''),
+            'doctor_speciality': self.config.get('deal_fields', 'doctor_speciality', fallback=''),
         }
 
     def get_stage_config(self) -> Dict[str, Any]:
         """Возвращает конфигурацию стадий: маппинг, финальные и защищённые"""
-        # Считываем JSON-подобные строки из конфига или используем простые CSV значения
-        def _get_map(section, option, fallback):
-            s = self.config.get(section, option, fallback=fallback)
-            # Формат: Статус1:WON,Статус2:NEW
+        # Считываем CSV строки из конфига
+        def _get_map(section, option):
+            s = self.config.get(section, option)
+            # Формат: Статус1:STAGE_ID,Статус2:STAGE_ID
             items = [i.strip() for i in s.split(',') if i.strip()]
             res = {}
             for it in items:
@@ -463,15 +516,26 @@ class ConfigManager:
                     res[k.strip()] = v.strip()
             return res
 
-        mapping = _get_map('Bitrix24', 'stage_mapping', "Запланирован:NEW,Пациент пришел:NEW,В процессе:UC_NO40X0,Завершен:UC_NO40X0,Завершен (счет выдан):WON,Отменен:LOSE")
-
-        finals = [s.strip() for s in self.config.get('Bitrix24', 'final_stages', fallback='WON,LOSE').split(',') if s.strip()]
-        protected = [s.strip() for s in self.config.get('Bitrix24', 'protected_stages', fallback='PREPAYMENT_INVOICE,FINAL_INVOICE,EXECUTING,APOLOGY').split(',') if s.strip()]
+        mapping = _get_map('deal_stages', 'mapping')
+        finals = [s.strip() for s in self.config.get('deal_stages', 'final').split(',') if s.strip()]
+        protected = [s.strip() for s in self.config.get('deal_stages', 'protected').split(',') if s.strip()]
 
         return {
             'mapping': mapping,
             'finals': finals,
             'protected': protected,
+        }
+
+    def get_deal_defaults(self) -> Dict[str, Any]:
+        """Возвращает значения по умолчанию для сделок"""
+        return {
+            'default_stage_id': self.config.get('deal_defaults', 'default_stage_id'),
+        }
+
+    def get_pipeline_config(self) -> Dict[str, Any]:
+        """Возвращает конфигурацию воронок"""
+        return {
+            'deal_category_id': self.config.getint('pipelines', 'deal_category_id'),
         }
 
     def get_sync_config(self) -> Dict[str, Any]:

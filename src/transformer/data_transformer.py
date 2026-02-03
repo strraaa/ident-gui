@@ -275,15 +275,19 @@ class StageMapper:
                 return stage
 
         # Частичное совпадение (например, 'завершено(счет выставлен)')
+        from src.config.config_manager_v2 import get_config
+        default_stage = get_config().get_deal_defaults().get('default_stage_id')
+        if not default_stage:
+            raise ValueError("default_stage_id not configured")
+
         if 'счет выдан' in norm or ('счет' in norm and 'выдан' in norm):
-            # если в конфиге есть явная стадия для 'WON', используем её, иначе 'WON'
-            return StageMapper._get_stage_mapping().get('Завершен (счет выдан)', 'WON')
+            return StageMapper._get_stage_mapping().get('Завершен (счет выдан)', default_stage)
 
         if 'завершен' in norm or 'завершено' in norm:
-            return StageMapper._get_stage_mapping().get('Завершен', 'UC_NO40X0')
+            return StageMapper._get_stage_mapping().get('Завершен', default_stage)
 
-        # По умолчанию — если в маппинге есть 'Запланирован', используем, иначе 'NEW'
-        return StageMapper._get_stage_mapping().get('Запланирован', 'NEW')
+        # По умолчанию — если в маппинге есть 'Запланирован', используем, иначе default_stage
+        return StageMapper._get_stage_mapping().get('Запланирован', default_stage)
 
     @staticmethod
     def is_stage_protected(stage_id: Optional[str]) -> bool:
@@ -291,8 +295,8 @@ class StageMapper:
         Проверяет защищена ли стадия от автоизменения
 
         Защищаются:
-        - Финальные стадии (WON, LOSE) - закрытые сделки
-        - Ручные стадии менеджера (PREPAYMENT_INVOICE, FINAL_INVOICE, EXECUTING, APOLOGY)
+        - Финальные стадии (из конфига)
+        - Ручные стадии менеджера (из конфига)
 
         Args:
             stage_id: ID стадии
@@ -315,7 +319,7 @@ class StageMapper:
             stage_id: ID стадии
 
         Returns:
-            True если стадия финальная (WON или LOSE)
+            True если стадия финальная (по конфигу)
         """
         return stage_id in StageMapper._get_final_stages() if stage_id else False
 
@@ -459,17 +463,17 @@ class DataTransformer:
         from src.config.config_manager_v2 import get_config
         field_map = get_config().get_bitrix_field_map()
 
-        contact_card_field = field_map.get('contact_card_number', 'UF_CRM_1769083788971')
-        contact_parent_field = field_map.get('contact_parent', 'UF_CRM_1769087537061')
+        contact_card_field = field_map.get('contact_card_number')
+        contact_parent_field = field_map.get('contact_parent')
 
-        deal_start_field = field_map.get('deal_start', 'UF_CRM_1769008900')
-        deal_end_field = field_map.get('deal_end', 'UF_CRM_1769008947')
-        deal_doctor_field = field_map.get('deal_doctor', 'UF_CRM_1769008996')
-        deal_services_field = field_map.get('deal_services', 'UF_CRM_1769009098')
-        deal_status_field = field_map.get('deal_status', 'UF_CRM_1769009157')
-        deal_card_field = field_map.get('deal_card_number', 'UF_CRM_1769083581481')
-        deal_parent_field = field_map.get('deal_parent', 'UF_CRM_1769087458477')
-        deal_comment_field = field_map.get('deal_comment', 'UF_CRM_1769494714842')
+        deal_start_field = field_map.get('deal_start')
+        deal_end_field = field_map.get('deal_end')
+        deal_doctor_field = field_map.get('deal_doctor')
+        deal_services_field = field_map.get('deal_services')
+        deal_status_field = field_map.get('deal_status')
+        deal_card_field = field_map.get('deal_card_number')
+        deal_parent_field = field_map.get('deal_parent')
+        deal_comment_field = field_map.get('deal_comment')
 
         transformed = {
             # Идентификаторы
