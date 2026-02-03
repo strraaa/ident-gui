@@ -17,6 +17,7 @@ import requests
 from typing import Dict, Any, Optional, List, Tuple
 from functools import wraps
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 # Используем настроенный logger из custom_logger_v2
 from src.logger.custom_logger_v2 import get_logger
@@ -38,42 +39,55 @@ class Bitrix24RateLimitError(Bitrix24Error):
     pass
 
 
+class Bitrix24TransientError(Bitrix24Error):
+    """Временная ошибка (таймауты, 5xx, сбои соединения)"""
+    pass
+
+
 class Bitrix24NotFoundError(Bitrix24Error):
     """Сущность не найдена"""
     pass
 
 
-def retry_on_api_error(max_attempts: int = 5, delay: float = 2.0, backoff: float = 2.5):
+def retry_on_api_error(max_attempts: Optional[int] = None, delay: float = 2.0, backoff: float = 2.5):
     """
     Декоратор для retry при ошибках API
 
-    ИСПРАВЛЕНИЕ: Увеличено max_attempts с 3 до 5, delay с 1.0 до 2.0, backoff с 2.0 до 2.5
+    ИСПРАВЛЕНИЕ: Дефолты увеличены до 5/2.0/2.5; если задан self.max_retries, используем его.
     Предотвращает ConnectionResetError: более агрессивный retry с большими паузами
 
     Args:
-        max_attempts: Максимальное количество попыток (5 вместо 3)
+        max_attempts: Максимальное количество попыток (если None, используем self.max_retries или 5)
         delay: Начальная задержка в секундах (2.0 вместо 1.0)
         backoff: Множитель для экспоненциальной задержки (2.5 вместо 2.0)
     """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            effective_attempts = max_attempts
+            if effective_attempts is None and args:
+                effective_attempts = getattr(args[0], 'max_retries', None)
+            if effective_attempts is None:
+                effective_attempts = 5
+            if effective_attempts < 1:
+                raise ValueError("max_attempts must be >= 1")
+
             attempt = 0
             current_delay = delay
 
-            while attempt < max_attempts:
+            while attempt < effective_attempts:
                 try:
                     return func(*args, **kwargs)
 
-                except (requests.RequestException, Bitrix24RateLimitError) as e:
+                except (requests.RequestException, Bitrix24RateLimitError, Bitrix24TransientError) as e:
                     attempt += 1
 
-                    if attempt >= max_attempts:
+                    if attempt >= effective_attempts:
                         logger.error(f"API ошибка после {attempt} попыток: {e}")
                         raise
 
                     logger.warning(
-                        f"API ошибка, попытка {attempt}/{max_attempts} "
+                        f"API ошибка, попытка {attempt}/{effective_attempts} "
                         f"через {current_delay:.1f}с: {e}"
                     )
                     time.sleep(current_delay)
@@ -93,14 +107,19 @@ class RateLimiter:
     """
     Rate limiter для соблюдения лимитов API Битрикс24
 
-    Лимиты:
-    - 2 запроса в секунду
-    - 120 запросов в минуту
+    Лимиты (по умолчанию):
+    - 1 запрос в секунду
+    - 60 запросов в минуту
     """
 
     def __init__(self, requests_per_second: float = 1.0, requests_per_minute: int = 60):
         # ИСПРАВЛЕНИЕ: Уменьшено с 2.0 до 1.0 req/sec и 120 до 60 req/min
         # Предотвращает ConnectionResetError от Bitrix24 при высокой нагрузке
+        if requests_per_second <= 0:
+            raise ValueError("requests_per_second must be > 0")
+        if requests_per_minute <= 0:
+            raise ValueError("requests_per_minute must be > 0")
+
         self.requests_per_second = requests_per_second
         self.requests_per_minute = requests_per_minute
 
@@ -149,7 +168,7 @@ class Bitrix24Client:
         self,
         webhook_url: str,
         request_timeout: int = 30,
-        max_retries: int = 3,
+        max_retries: int = 5,
         enable_rate_limiting: bool = True,
         default_assigned_by_id: Optional[int] = None
     ):
@@ -165,6 +184,10 @@ class Bitrix24Client:
         """
         if not webhook_url or not webhook_url.startswith(('http://', 'https://')):
             raise ValueError(f"Невалидный webhook_url: {webhook_url}")
+        if request_timeout <= 0:
+            raise ValueError("request_timeout must be > 0")
+        if max_retries is not None and max_retries < 1:
+            raise ValueError("max_retries must be >= 1")
 
         self.webhook_url = webhook_url.rstrip('/')
         self.request_timeout = request_timeout
@@ -182,6 +205,24 @@ class Bitrix24Client:
             logger.info(f"Bitrix24Client инициализирован: {masked_url} (ответственный: {default_assigned_by_id})")
         else:
             logger.info(f"Bitrix24Client инициализирован: {masked_url}")
+
+    @staticmethod
+    def _require_value(value: Any, field_name: str) -> Any:
+        """Базовая валидация обязательных полей."""
+        if value is None:
+            raise ValueError(f"{field_name} is required")
+        if isinstance(value, str) and not value.strip():
+            raise ValueError(f"{field_name} is required")
+        return value
+
+    @staticmethod
+    def _clean_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Убирает None и пустые строки, оставляет 0/False."""
+        return {k: v for k, v in fields.items() if v is not None and v != ''}
+
+    def _get_field_map(self) -> Dict[str, str]:
+        from src.config.config_manager_v2 import get_config
+        return get_config().get_bitrix_field_map()
 
     def _make_request(
         self,
@@ -225,7 +266,7 @@ class Bitrix24Client:
                 raise Bitrix24RateLimitError("Превышен лимит запросов API")
 
             if response.status_code >= 500:
-                raise Bitrix24Error(f"Ошибка сервера Битрикс24: {response.status_code}")
+                raise Bitrix24TransientError(f"Ошибка сервера Битрикс24: {response.status_code}")
 
             response.raise_for_status()
 
@@ -252,18 +293,23 @@ class Bitrix24Client:
 
             return data
 
-        except requests.Timeout:
-            raise Bitrix24Error(f"Таймаут запроса к API (>{self.request_timeout}с)")
+        except requests.Timeout as e:
+            raise Bitrix24TransientError(f"Таймаут запроса к API (>{self.request_timeout}с): {e}")
 
         except requests.ConnectionError as e:
-            raise Bitrix24Error(f"Ошибка соединения с Битрикс24: {e}")
+            raise Bitrix24TransientError(f"Ошибка соединения с Битрикс24: {e}")
+
+        except requests.HTTPError as e:
+            status_code = e.response.status_code if e.response else "unknown"
+            raise Bitrix24Error(f"Ошибка HTTP {status_code}: {e}")
 
         except requests.RequestException as e:
-            raise Bitrix24Error(f"Ошибка HTTP запроса: {e}")
+            raise Bitrix24TransientError(f"Ошибка HTTP запроса: {e}")
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """Ищет первый контакт по телефону"""
+        phone = self._require_value(phone, 'phone')
         result = self._make_request(
             'crm.contact.list',
             {
@@ -293,6 +339,7 @@ class Bitrix24Client:
         ВАЖНО: filter[PHONE] для лидов НЕ РАБОТАЕТ если телефон в контакте!
         Поэтому ищем через контакт: phone → CONTACT_ID → lead
         """
+        phone = self._require_value(phone, 'phone')
         logger.debug(f"Поиск лида по телефону: {phone}")
 
         # Сначала ищем контакт
@@ -352,8 +399,11 @@ class Bitrix24Client:
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def create_contact(self, contact_data: Dict[str, Any]) -> int:
         """Создает новый контакт"""
-        from src.config.config_manager_v2 import get_config
-        field_map = get_config().get_bitrix_field_map()
+        if not isinstance(contact_data, dict):
+            raise ValueError("contact_data must be a dict")
+        phone = self._require_value(contact_data.get('phone'), 'contact.phone')
+
+        field_map = self._get_field_map()
 
         contact_card = field_map.get('contact_card_number', 'UF_CRM_1769083788971')
         contact_parent = field_map.get('contact_parent', 'UF_CRM_1769087537061')
@@ -363,7 +413,7 @@ class Bitrix24Client:
             'LAST_NAME': contact_data.get('last_name', ''),
             'SECOND_NAME': contact_data.get('second_name', ''),
             'TYPE_ID': contact_data.get('type_id', 'CLIENT'),
-            'PHONE': [{'VALUE': contact_data['phone'], 'VALUE_TYPE': 'MOBILE'}],
+            'PHONE': [{'VALUE': phone, 'VALUE_TYPE': 'MOBILE'}],
             contact_card: contact_data.get(contact_card, ''),
             contact_parent: contact_data.get(contact_parent, '')
         }
@@ -384,8 +434,7 @@ class Bitrix24Client:
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deal_by_ident_id(self, ident_id: str) -> Optional[Dict[str, Any]]:
         """Ищет сделку по IDENT ID"""
-        from src.config.config_manager_v2 import get_config
-        field_map = get_config().get_bitrix_field_map()
+        field_map = self._get_field_map()
         ident_field = field_map.get('ident_field', 'UF_CRM_1769072841035')
 
         result = self._make_request(
@@ -408,8 +457,7 @@ class Bitrix24Client:
         """Ищет сделки контакта без IDENT ID"""
         from src.transformer.data_transformer import StageMapper
 
-        from src.config.config_manager_v2 import get_config
-        field_map = get_config().get_bitrix_field_map()
+        field_map = self._get_field_map()
         ident_field = field_map.get('ident_field', 'UF_CRM_1769072841035')
 
         result = self._make_request(
@@ -445,8 +493,7 @@ class Bitrix24Client:
         """
         try:
             # Формируем поля
-            from src.config.config_manager_v2 import get_config
-            field_map = get_config().get_bitrix_field_map()
+            field_map = self._get_field_map()
 
             deal_start_field = field_map.get('deal_start', 'UF_CRM_1769008900')
             deal_end_field = field_map.get('deal_end', 'UF_CRM_1769008947')
@@ -500,10 +547,7 @@ class Bitrix24Client:
 
             # ИСПРАВЛЕНИЕ: Удаляем None и пустые строки (бесполезные для Bitrix24)
             # Оставляем 0 и False (валидные значения)
-            fields = {
-                k: v for k, v in fields.items()
-                if v is not None and v != ''  # Убираем None и пустые строки
-            }
+            fields = self._clean_fields(fields)
 
             result = self._make_request('crm.deal.add', {'fields': fields})
 
@@ -533,8 +577,7 @@ class Bitrix24Client:
         """
         try:
             # Формируем поля (аналогично create_deal)
-            from src.config.config_manager_v2 import get_config
-            field_map = get_config().get_bitrix_field_map()
+            field_map = self._get_field_map()
 
             deal_start_field = field_map.get('deal_start', 'UF_CRM_1769008900')
             deal_end_field = field_map.get('deal_end', 'UF_CRM_1769008947')
@@ -575,10 +618,7 @@ class Bitrix24Client:
 
             # ИСПРАВЛЕНИЕ: Удаляем None и пустые строки (бесполезные для Bitrix24)
             # Оставляем 0 и False (валидные значения)
-            fields = {
-                k: v for k, v in fields.items()
-                if v is not None and v != ''  # Убираем None и пустые строки
-            }
+            fields = self._clean_fields(fields)
 
             # ИСПРАВЛЕНИЕ: Логируем если поля пустые (помогает диагностировать "фантомные" обновления)
             if not fields:
@@ -596,9 +636,7 @@ class Bitrix24Client:
             )
 
             # Логируем ключевые поля для диагностики "пустых" обновлений
-            from src.config.config_manager_v2 import get_config
-            fm = get_config().get_bitrix_field_map()
-            key_fields = ['TITLE', 'STAGE_ID', 'OPPORTUNITY', fm.get('deal_start', 'UF_CRM_1769008900'), fm.get('deal_doctor', 'UF_CRM_1769008996')]
+            key_fields = ['TITLE', 'STAGE_ID', 'OPPORTUNITY', deal_start_field, deal_doctor_field]
             key_values = {k: fields.get(k, '<отсутствует>') for k in key_fields if k in fields}
             if key_values:
                 logger.debug(f"Ключевые поля сделки {deal_id}: {key_values}")
@@ -704,7 +742,7 @@ class Bitrix24Client:
             commands = {}
             for phone in chunk:
                 # Экранируем специальные символы в телефоне для использования в query string
-                safe_phone = phone.replace('+', '%2B')
+                safe_phone = quote(str(phone), safe='')
                 commands[phone] = f"crm.contact.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=SECOND_NAME&select[]=PHONE"
 
             results = self.batch_execute(commands)
@@ -738,6 +776,9 @@ class Bitrix24Client:
 
         deals = {}
 
+        field_map = self._get_field_map()
+        ident_field = field_map.get('ident_field', 'UF_CRM_1769072841035')
+
         # Обрабатываем по 50 элементов за раз (лимит Битрикс24)
         for i in range(0, len(ident_ids), 50):
             chunk = ident_ids[i:i + 50]
@@ -745,8 +786,6 @@ class Bitrix24Client:
             # Формируем batch команды для текущего чанка
             commands = {}
             for ident_id in chunk:
-                from src.config.config_manager_v2 import get_config
-                ident_field = get_config().get_bitrix_field_map().get('ident_field', 'UF_CRM_1769072841035')
                 commands[ident_id] = f"crm.deal.list?filter[{ident_field}]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]={ident_field}"
 
             results = self.batch_execute(commands)
