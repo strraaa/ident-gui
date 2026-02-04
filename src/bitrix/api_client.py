@@ -376,36 +376,43 @@ class Bitrix24Client:
         logger.debug(f"Лидов после фильтрации закрытых статусов: {len(leads)}")
         return leads[0] if leads else None
 
-    @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
-    def convert_lead(self, lead_id: int, contact_id: Optional[int] = None) -> Optional[int]:
-        """Конвертирует лид в сделку"""
-        params = {
-            'LEAD_ID': lead_id,
-            'CREATE_CONTACT': 'N' if contact_id else 'Y',
-            'CREATE_COMPANY': 'N',
-            'CREATE_DEAL': 'Y'
-        }
+    @retry_on_api_error()
+    def update_lead(self, lead_id: int, fields: Dict[str, Any]) -> bool:
+        """Обновляет поля лида"""
+        result = self._make_request('crm.lead.update', {'id': lead_id, 'fields': fields})
+        return bool(result.get('result'))
 
-        if contact_id:
-            params['CONTACT_ID'] = contact_id
-        # Устанавливаем воронку для создаваемой сделки, если задано
+    def convert_lead(self, lead_id: int, contact_id: int, deal_data: Dict[str, Any]) -> Optional[int]:
+        """
+        Конвертирует лид в сделку: создаёт сделку и помечает лид как Converted.
+
+        crm.lead.convert не доступен в данном аккаунте (404), поэтому конвертация
+        реализована как два последовательных запроса:
+          1. crm.deal.add — создание сделки для существующего контакта
+          2. crm.lead.update — установка STATUS_ID = Converted
+
+        Args:
+            lead_id: ID лида для конвертации
+            contact_id: ID контакта (уже существует)
+            deal_data: Поля сделки (передаются в create_deal)
+
+        Returns:
+            ID созданной сделки или None при ошибке
+        """
+        deal_id = self.create_deal(deal_data, contact_id)
+
+        if not deal_id:
+            logger.warning(f"Конвертация лида {lead_id}: create_deal не вернул ID сделки")
+            return None
+
         try:
-            from src.config.config_manager_v2 import get_config
-            category_id = get_config().get_pipeline_config().get('deal_category_id')
-            if category_id is not None:
-                params['DEAL_CATEGORY_ID'] = category_id
-        except Exception as e:
-            logger.warning(f"Не удалось получить deal_category_id: {e}")
-
-        result = self._make_request('crm.lead.convert', params)
-        deal_id = result.get('result', {}).get('DEAL_ID')
-
-        if deal_id:
+            self.update_lead(lead_id, {'STATUS_ID': 'Converted'})
             logger.info(f"Лид {lead_id} конвертирован в сделку {deal_id}")
-            return int(deal_id)
+        except Bitrix24Error as e:
+            # Сделка уже создана — не откатываем, просто логируем
+            logger.warning(f"Сделка {deal_id} создана, но обновление статуса лида {lead_id} не удалось: {e}")
 
-        logger.warning(f"Конвертация лида {lead_id} не вернула ID сделки")
-        return None
+        return deal_id
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def get_deal(self, deal_id: int) -> Optional[Dict[str, Any]]:
