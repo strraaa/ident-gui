@@ -661,7 +661,7 @@ class Bitrix24Client:
             raise
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
-    def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False) -> Dict[str, Any]:
+    def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False, raise_on_error: bool = True) -> Dict[str, Any]:
         """
          BATCH ОПТИМИЗАЦИЯ: Выполняет несколько команд за один запрос
 
@@ -725,7 +725,8 @@ class Bitrix24Client:
                     logger.warning(msg)
 
                 # Считаем batch неуспешным, чтобы избежать тихих потерь данных
-                raise Bitrix24Error("Batch завершился с ошибками: " + "; ".join(errors_summary))
+                if raise_on_error:
+                    raise Bitrix24Error("Batch завершился с ошибками: " + "; ".join(errors_summary))
 
             logger.debug(f"Batch выполнен: {len(commands)} команд, успешно: {len(result_data)}")
 
@@ -762,7 +763,11 @@ class Bitrix24Client:
                 safe_phone = quote(str(phone), safe='')
                 commands[phone] = f"crm.contact.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=SECOND_NAME&select[]=PHONE"
 
-            results = self.batch_execute(commands)
+            try:
+                results = self.batch_execute(commands, raise_on_error=False)
+            except Bitrix24Error as e:
+                logger.error(f"Batch поиск контактов завершился ошибкой: {e}")
+                return {phone: None for phone in phones}
 
             # Парсим результаты для текущего чанка
             for phone in chunk:
@@ -805,7 +810,11 @@ class Bitrix24Client:
             for ident_id in chunk:
                 commands[ident_id] = f"crm.deal.list?filter[{ident_field}]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]={ident_field}"
 
-            results = self.batch_execute(commands)
+            try:
+                results = self.batch_execute(commands, raise_on_error=False)
+            except Bitrix24Error as e:
+                logger.error(f"Batch поиск сделок завершился ошибкой: {e}")
+                return {ident_id: None for ident_id in ident_ids}
 
             # Парсим результаты для текущего чанка
             for ident_id in chunk:
@@ -847,7 +856,11 @@ class Bitrix24Client:
 
             logger.debug(f"Batch поиск лидов по CONTACT_ID: чанк {len(chunk)} контактов")
 
-            results = self.batch_execute(commands)
+            try:
+                results = self.batch_execute(commands, raise_on_error=False)
+            except Bitrix24Error as e:
+                logger.error(f"Batch поиск лидов завершился ошибкой: {e}")
+                return {phone: None for phone in phones}
 
             # Парсим результаты для текущего чанка
             for contact_id in chunk:
