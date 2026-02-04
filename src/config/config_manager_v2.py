@@ -251,6 +251,7 @@ class ConfigManager:
             'deal_defaults': ['default_stage_id'],
             'deal_stages': ['mapping', 'final', 'protected'],
             'pipelines': ['deal_category_id'],
+            'lead_statuses': ['closed'],
         }
         for section, keys in required_sections.items():
             if not self.config.has_section(section):
@@ -525,6 +526,11 @@ class ConfigManager:
             'finals': finals,
             'protected': protected,
         }
+
+    def get_lead_status_config(self) -> Dict[str, Any]:
+        """Возвращает конфигурацию статусов лидов"""
+        closed = [s.strip() for s in self.config.get('lead_statuses', 'closed').split(',') if s.strip()]
+        return {'closed': closed}
 
     def get_deal_defaults(self) -> Dict[str, Any]:
         """Возвращает значения по умолчанию для сделок"""

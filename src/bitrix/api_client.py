@@ -367,6 +367,13 @@ class Bitrix24Client:
 
         leads = result.get('result', [])
         logger.debug(f"Найдено лидов для контакта {contact_id}: {len(leads)}")
+
+        # Фильтруем закрытые статусы
+        from src.config.config_manager_v2 import get_config
+        closed_statuses = set(get_config().get_lead_status_config().get('closed', []))
+        leads = [l for l in leads if l.get('STATUS_ID') not in closed_statuses]
+
+        logger.debug(f"Лидов после фильтрации закрытых статусов: {len(leads)}")
         return leads[0] if leads else None
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
@@ -877,14 +884,17 @@ class Bitrix24Client:
                 results = self.batch_execute(commands, raise_on_error=False)
             except Bitrix24Error as e:
                 logger.error(f"Batch поиск лидов завершился ошибкой: {e}")
-                return {phone: None for phone in phones}
+                return {contact_id: None for contact_id in contact_ids}
 
             # Парсим результаты для текущего чанка
             for contact_id in chunk:
                 key = str(contact_id)
                 if key in results:
                     lead_list = results[key] if isinstance(results[key], list) else []
-                    found_lead = lead_list[0] if lead_list else None
+                    from src.config.config_manager_v2 import get_config
+                    closed_statuses = set(get_config().get_lead_status_config().get('closed', []))
+                    filtered = [l for l in lead_list if l.get('STATUS_ID') not in closed_statuses]
+                    found_lead = filtered[0] if filtered else None
                     leads[contact_id] = found_lead
 
                     if found_lead:
