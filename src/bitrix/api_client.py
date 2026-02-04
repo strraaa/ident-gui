@@ -381,6 +381,14 @@ class Bitrix24Client:
 
         if contact_id:
             params['CONTACT_ID'] = contact_id
+        # Устанавливаем воронку для создаваемой сделки, если задано
+        try:
+            from src.config.config_manager_v2 import get_config
+            category_id = get_config().get_pipeline_config().get('deal_category_id')
+            if category_id is not None:
+                params['DEAL_CATEGORY_ID'] = category_id
+        except Exception as e:
+            logger.warning(f"Не удалось получить deal_category_id: {e}")
 
         result = self._make_request('crm.lead.convert', params)
         deal_id = result.get('result', {}).get('DEAL_ID')
@@ -547,6 +555,15 @@ class Bitrix24Client:
                 treatment_plan_field: deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения
                 treatment_plan_hash_field: deal_data.get('uf_crm_treatment_plan_hash'),  # MD5 хеш
             }
+
+            # Устанавливаем воронку для сделки, если задано
+            try:
+                from src.config.config_manager_v2 import get_config
+                category_id = get_config().get_pipeline_config().get('deal_category_id')
+                if category_id is not None:
+                    fields['CATEGORY_ID'] = category_id
+            except Exception as e:
+                logger.warning(f"Не удалось получить deal_category_id: {e}")
 
             # Устанавливаем ответственного если указан в конфиге
             if self.default_assigned_by_id:
