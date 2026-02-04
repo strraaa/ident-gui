@@ -377,6 +377,12 @@ class Bitrix24Client:
         return leads[0] if leads else None
 
     @retry_on_api_error()
+    def get_lead(self, lead_id: int) -> Optional[Dict[str, Any]]:
+        """Получает данные лида по ID"""
+        result = self._make_request('crm.lead.get', {'id': lead_id})
+        return result.get('result')
+
+    @retry_on_api_error()
     def update_lead(self, lead_id: int, fields: Dict[str, Any]) -> bool:
         """Обновляет поля лида"""
         result = self._make_request('crm.lead.update', {'id': lead_id, 'fields': fields})
@@ -384,12 +390,13 @@ class Bitrix24Client:
 
     def convert_lead(self, lead_id: int, contact_id: int, deal_data: Dict[str, Any]) -> Optional[int]:
         """
-        Конвертирует лид в сделку: создаёт сделку и помечает лид как Converted.
+        Конвертирует лид в сделку: создаёт сделку и помечает лид как конвертированный.
 
         crm.lead.convert не доступен в данном аккаунте (404), поэтому конвертация
-        реализована как два последовательных запроса:
-          1. crm.deal.add — создание сделки для существующего контакта
-          2. crm.lead.update — установка STATUS_ID = Converted
+        реализована как три последовательных запроса:
+          1. crm.lead.get — читаем SOURCE_ID и SOURCE_DESCRIPTION из лида
+          2. crm.deal.add — создание сделки (с SOURCE_ID из лида)
+          3. crm.lead.update — установка STATUS_ID из конфига (closed[0])
 
         Args:
             lead_id: ID лида для конвертации
@@ -399,6 +406,15 @@ class Bitrix24Client:
         Returns:
             ID созданной сделки или None при ошибке
         """
+        # Читаем лид для переноса SOURCE_ID в сделку
+        lead = self.get_lead(lead_id)
+        if lead:
+            for field in ('SOURCE_ID', 'SOURCE_DESCRIPTION'):
+                value = lead.get(field)
+                if value:
+                    deal_data[field] = value
+                    logger.debug(f"Перенос из лида {lead_id}: {field}={value}")
+
         deal_id = self.create_deal(deal_data, contact_id)
 
         if not deal_id:
@@ -406,8 +422,13 @@ class Bitrix24Client:
             return None
 
         try:
-            self.update_lead(lead_id, {'STATUS_ID': 'Converted'})
-            logger.info(f"Лид {lead_id} конвертирован в сделку {deal_id}")
+            # STATUS_ID берём из конфига (closed содержит CONVERTED) — значение case-sensitive
+            from src.config.config_manager_v2 import get_config
+            closed = get_config().get_lead_status_config().get('closed', [])
+            converted_status = next((s for s in closed if 'CONVERT' in s.upper()), 'Converted')
+
+            self.update_lead(lead_id, {'STATUS_ID': converted_status})
+            logger.info(f"Лид {lead_id} конвертирован в сделку {deal_id} (статус={converted_status})")
         except Bitrix24Error as e:
             # Сделка уже создана — не откатываем, просто логируем
             logger.warning(f"Сделка {deal_id} создана, но обновление статуса лида {lead_id} не удалось: {e}")
@@ -545,6 +566,8 @@ class Bitrix24Client:
                 'CONTACT_ID': contact_id,
                 'OPPORTUNITY': deal_data.get('opportunity', 0),
                 'CURRENCY_ID': deal_data.get('currency_id', 'RUB'),
+                'SOURCE_ID': deal_data.get('SOURCE_ID'),
+                'SOURCE_DESCRIPTION': deal_data.get('SOURCE_DESCRIPTION'),
 
                 # Кастомные поля (из конфига)
                 deal_start_field: deal_data.get(deal_start_field),  # Дата начало приема
