@@ -406,6 +406,9 @@ class Bitrix24Client:
         Returns:
             ID созданной сделки или None при ошибке
         """
+        # Копируем deal_data — convert_lead добавляет SOURCE_ID и не должен мутировать dict вызывающего
+        deal_data = dict(deal_data)
+
         # Читаем лид для переноса SOURCE_ID в сделку
         lead = self.get_lead(lead_id)
         if lead:

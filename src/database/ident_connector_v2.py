@@ -301,7 +301,7 @@ class IdentConnector:
         port: int = 1433,
         connection_timeout: int = 10,
         query_timeout: int = 30,
-        pool_size: int = 3
+        pool_size: int = 1
     ):
         self.server = server
         self.database = database
@@ -625,7 +625,10 @@ class IdentConnector:
             logger.error(f"Неожиданная ошибка при извлечении записей: {e}", exc_info=True)
             raise
 
-    @retry_on_db_error(max_attempts=3, delay=1.0, backoff=2.0)
+    # NOTE: @retry_on_db_error REMOVED — декоратор оборачивает вызов функции,
+    # который для генератора просто возвращает объект-генератор (код не выполняется).
+    # Исключения при итерации генератора выбрасываются на месте next() и декоратор
+    # их никогда не видит. Retry здесь полностью бесполезен.
     def get_receptions_iter(
         self,
         last_sync_time: Optional[datetime] = None,
@@ -1260,7 +1263,7 @@ class IdentConnector:
 
 if __name__ == "__main__":
     # Тестирование модуля
-    from src.config.config_manager import get_config
+    from src.config.config_manager_v2 import get_config
 
     try:
         config = get_config("config.example.ini")
