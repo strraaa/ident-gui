@@ -222,6 +222,45 @@ class Bitrix24Client:
         """Убирает None и пустые строки, оставляет 0/False."""
         return {k: v for k, v in fields.items() if v is not None and v != ''}
 
+    @staticmethod
+    def _generate_phone_variants(phone: str) -> List[str]:
+        """
+        Генерирует все возможные варианты формата телефона для поиска дублей.
+
+        Проблема: в Битриксе контакты могут быть созданы с номерами вида:
+        +79991234567, 79991234567, 89991234567, +89991234567, 9991234567
+
+        Стандартный поиск по одному формату не находит контакты в другом формате,
+        что приводит к созданию дублей.
+
+        Args:
+            phone: Нормализованный телефон (+79991234567)
+
+        Returns:
+            Список вариантов формата: ['+79991234567', '79991234567', '89991234567', '+89991234567']
+
+        Examples:
+            '+79991234567' → ['+79991234567', '79991234567', '89991234567', '+89991234567']
+        """
+        if not phone or not isinstance(phone, str):
+            return []
+
+        # Извлекаем чистые цифры
+        digits = ''.join(c for c in phone if c.isdigit())
+
+        # Для российских номеров (11 цифр начиная с 7)
+        if len(digits) == 11 and digits.startswith('7'):
+            base_digits = digits[1:]  # 9991234567
+            return [
+                f'+7{base_digits}',  # +79991234567 (нормализованный)
+                f'7{base_digits}',   # 79991234567 (без +)
+                f'8{base_digits}',   # 89991234567 (8 вместо 7)
+                f'+8{base_digits}'   # +89991234567 (+8)
+            ]
+
+        # Если телефон уже в другом формате — возвращаем его + варианты
+        return [phone]
+
     def _get_field_map(self) -> Dict[str, str]:
         from src.config.config_manager_v2 import get_config
         return get_config().get_bitrix_field_map()
@@ -310,26 +349,70 @@ class Bitrix24Client:
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
-        """Ищет первый контакт по телефону"""
+        """
+        Ищет первый контакт по телефону (с поддержкой разных форматов).
+
+        Для предотвращения дублей ищет контакт по всем возможным вариантам формата:
+        +79991234567, 79991234567, 89991234567, +89991234567
+
+        Args:
+            phone: Телефон (в любом формате, желательно нормализованный)
+
+        Returns:
+            Первый найденный контакт или None
+        """
         phone = self._require_value(phone, 'phone')
-        result = self._make_request(
-            'crm.contact.list',
-            {
-                'filter': {'PHONE': phone},
-                'select': ['ID', 'NAME', 'LAST_NAME', 'PHONE'],
-                'order': {'DATE_CREATE': 'ASC'}
-            }
-        )
 
-        contacts = result.get('result', [])
+        # Генерируем все варианты формата телефона
+        phone_variants = self._generate_phone_variants(phone)
 
-        if contacts:
-            contact = contacts[0]
-            logger.info(
-                f"Найден контакт {contact['ID']} "
-                f"({contact.get('LAST_NAME', '')} {contact.get('NAME', '')})"
+        if not phone_variants:
+            logger.warning(f"Не удалось сгенерировать варианты для телефона: {phone}")
+            return None
+
+        # Если только один вариант — делаем обычный запрос (оптимизация)
+        if len(phone_variants) == 1:
+            result = self._make_request(
+                'crm.contact.list',
+                {
+                    'filter': {'PHONE': phone},
+                    'select': ['ID', 'NAME', 'LAST_NAME', 'PHONE'],
+                    'order': {'DATE_CREATE': 'ASC'}
+                }
             )
-            return contact
+            contacts = result.get('result', [])
+            if contacts:
+                contact = contacts[0]
+                logger.info(
+                    f"Найден контакт {contact['ID']} "
+                    f"({contact.get('LAST_NAME', '')} {contact.get('NAME', '')})"
+                )
+                return contact
+            return None
+
+        # Batch-поиск по всем вариантам (защита от дублей)
+        commands = {}
+        for variant in phone_variants:
+            safe_variant = quote(variant, safe='')
+            commands[variant] = f"crm.contact.list?filter[PHONE]={safe_variant}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=PHONE&order[DATE_CREATE]=ASC"
+
+        try:
+            results = self.batch_execute(commands, raise_on_error=False)
+        except Bitrix24Error as e:
+            logger.error(f"Batch поиск контакта по телефону завершился ошибкой: {e}")
+            return None
+
+        # Ищем первый вариант с результатом
+        for variant in phone_variants:
+            if variant in results:
+                contact_list = results[variant] if isinstance(results[variant], list) else []
+                if contact_list:
+                    contact = contact_list[0]
+                    logger.info(
+                        f"Найден контакт {contact['ID']} по варианту {variant} "
+                        f"({contact.get('LAST_NAME', '')} {contact.get('NAME', '')})"
+                    )
+                    return contact
 
         return None
 
@@ -796,7 +879,10 @@ class Bitrix24Client:
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_find_contacts_by_phones(self, phones: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
         """
-         BATCH ОПТИМИЗАЦИЯ: Ищет несколько контактов по телефонам за один запрос
+        BATCH ОПТИМИЗАЦИЯ: Ищет несколько контактов по телефонам за один запрос.
+
+        Для предотвращения дублей ищет каждый телефон по всем вариантам формата:
+        +79991234567, 79991234567, 89991234567, +89991234567
 
         Args:
             phones: Список телефонов
@@ -809,31 +895,51 @@ class Bitrix24Client:
 
         contacts = {}
 
-        # Обрабатываем по 50 элементов за раз (лимит Битрикс24)
-        for i in range(0, len(phones), 50):
-            chunk = phones[i:i + 50]
+        # Обрабатываем по чанкам с учетом что каждый телефон генерирует ~4 варианта
+        # Лимит Битрикс24 — 50 команд, поэтому берем по 12 телефонов за раз (12*4=48 < 50)
+        chunk_size = 12
+        for i in range(0, len(phones), chunk_size):
+            chunk = phones[i:i + chunk_size]
 
-            # Формируем batch команды для текущего чанка
+            # Формируем batch команды для всех вариантов телефонов
             commands = {}
+            phone_to_variants = {}
+
             for phone in chunk:
-                # Экранируем специальные символы в телефоне для использования в query string
-                safe_phone = quote(str(phone), safe='')
-                commands[phone] = f"crm.contact.list?filter[PHONE]={safe_phone}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=SECOND_NAME&select[]=PHONE"
+                variants = self._generate_phone_variants(phone)
+                phone_to_variants[phone] = variants
+
+                for variant in variants:
+                    safe_variant = quote(str(variant), safe='')
+                    # Ключ должен быть уникальным: используем phone::variant
+                    key = f"{phone}::{variant}"
+                    commands[key] = f"crm.contact.list?filter[PHONE]={safe_variant}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=SECOND_NAME&select[]=PHONE&order[DATE_CREATE]=ASC"
 
             try:
                 results = self.batch_execute(commands, raise_on_error=False)
             except Bitrix24Error as e:
                 logger.error(f"Batch поиск контактов завершился ошибкой: {e}")
-                return {phone: None for phone in phones}
+                # Возвращаем None для всех телефонов из chunk
+                for phone in chunk:
+                    contacts[phone] = None
+                continue
 
             # Парсим результаты для текущего чанка
             for phone in chunk:
-                if phone in results:
-                    # Результат уже является списком контактов
-                    contact_list = results[phone] if isinstance(results[phone], list) else []
-                    contacts[phone] = contact_list[0] if contact_list else None
-                else:
-                    contacts[phone] = None
+                variants = phone_to_variants.get(phone, [])
+                found_contact = None
+
+                # Ищем первый вариант с результатом
+                for variant in variants:
+                    key = f"{phone}::{variant}"
+                    if key in results:
+                        contact_list = results[key] if isinstance(results[key], list) else []
+                        if contact_list:
+                            found_contact = contact_list[0]
+                            logger.debug(f"Контакт для {phone} найден по варианту {variant}: ID={found_contact.get('ID')}")
+                            break
+
+                contacts[phone] = found_contact
 
         logger.info(f"Batch поиск контактов: запрошено {len(phones)}, найдено {sum(1 for c in contacts.values() if c)}")
 
