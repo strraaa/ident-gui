@@ -669,6 +669,14 @@ class ConfigManager:
             'enable_metrics': enable_metrics,
         }
 
+    def get_performance_config(self) -> Dict[str, Any]:
+        """Возвращает конфигурацию производительности"""
+        return {
+            'max_processing_time': self.config.getint('Performance', 'max_processing_time', fallback=2),
+            'batch_pause': self.config.getint('Performance', 'batch_pause', fallback=1),
+            'db_pool_size': self.config.getint('Performance', 'db_pool_size', fallback=2),
+        }
+
     def get_all_config(self) -> Dict[str, Dict[str, Any]]:
         """Возвращает всю конфигурацию"""
         return {

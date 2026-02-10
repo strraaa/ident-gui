@@ -301,7 +301,7 @@ class IdentConnector:
         port: int = 1433,
         connection_timeout: int = 10,
         query_timeout: int = 30,
-        pool_size: int = 1
+        pool_size: int = 2
     ):
         self.server = server
         self.database = database
