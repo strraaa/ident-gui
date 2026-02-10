@@ -467,9 +467,29 @@ class IdentConnector:
             last_sync_time = datetime.now() - timedelta(days=initial_days)
             logger.info(f"Первая синхронизация: загружаем данные за последние {initial_days} дней")
 
+        # Читаем конфигурацию фильтрации филиалов
+        from src.config.config_manager_v2 import get_config
+        filial_config = get_config().get_filial_filter_config()
+        enabled_filial_ids = filial_config.get('enabled_filial_ids', [])
+
+        # Формируем WHERE clause с учетом фильтрации филиалов
+        where_conditions = [
+            "(lu.LastUpdate > ? OR (lu.LastUpdate = ? AND r.ID > ?))"
+        ]
+
+        # Добавляем фильтр по филиалам если задан
+        if enabled_filial_ids:
+            filial_ids_str = ', '.join(str(fid) for fid in enabled_filial_ids)
+            where_conditions.append(
+                f"COALESCE(oc_order.ID, oc_armchair.ID, 0) IN ({filial_ids_str})"
+            )
+            logger.debug(f"Фильтр филиалов: {filial_ids_str}")
+
+        where_clause = ' AND '.join(where_conditions)
+
         # ОПТИМИЗИРОВАННЫЙ ЗАПРОС: убран N+1 problem через OUTER APPLY
         # ВАЖНО: используем единый "LastUpdate" для корректной инкрементальной синхронизации.
-        query = """
+        query = f"""
         SELECT TOP (?)
             -- Данные записи
             r.ID AS ReceptionID,
@@ -493,6 +513,7 @@ class IdentConnector:
             pn.NameProfession AS Speciality,
 
             -- Филиал и кабинет
+            COALESCE(oc_order.ID, oc_armchair.ID, 0) AS FilialID,  -- ID филиала из OwnCompanies
             COALESCE(oc_order.Name, oc_armchair.Name, 'Не указан') AS Filial,
             a.NameArmchair AS Armchair,
 
@@ -581,11 +602,7 @@ class IdentConnector:
             ) lu
 
         WHERE
-            -- Инкрементальная выборка по единой метке
-            (
-                lu.LastUpdate > ?
-                OR (lu.LastUpdate = ? AND r.ID > ?)
-            )
+            {where_clause}
 
         ORDER BY lu.LastUpdate ASC, r.ID ASC
         """
@@ -665,8 +682,28 @@ class IdentConnector:
             last_sync_time = datetime.now() - timedelta(days=initial_days)
             logger.info(f"Первая синхронизация: загружаем данные за последние {initial_days} дней")
 
+        # Читаем конфигурацию фильтрации филиалов
+        from src.config.config_manager_v2 import get_config
+        filial_config = get_config().get_filial_filter_config()
+        enabled_filial_ids = filial_config.get('enabled_filial_ids', [])
+
+        # Формируем WHERE clause с учетом фильтрации филиалов
+        where_conditions = [
+            "(lu.LastUpdate > ? OR (lu.LastUpdate = ? AND r.ID > ?))"
+        ]
+
+        # Добавляем фильтр по филиалам если задан
+        if enabled_filial_ids:
+            filial_ids_str = ', '.join(str(fid) for fid in enabled_filial_ids)
+            where_conditions.append(
+                f"COALESCE(oc_order.ID, oc_armchair.ID, 0) IN ({filial_ids_str})"
+            )
+            logger.debug(f"Фильтр филиалов: {filial_ids_str}")
+
+        where_clause = ' AND '.join(where_conditions)
+
         # Используем тот же запрос что и в get_receptions(), но с курсором для стабильной пагинации
-        query = """
+        query = f"""
         SELECT TOP (?)
             -- Данные записи
             r.ID AS ReceptionID,
@@ -690,6 +727,7 @@ class IdentConnector:
             pn.NameProfession AS Speciality,
 
             -- Филиал и кабинет
+            COALESCE(oc_order.ID, oc_armchair.ID, 0) AS FilialID,  -- ID филиала из OwnCompanies
             COALESCE(oc_order.Name, oc_armchair.Name, 'Не указан') AS Filial,
             a.NameArmchair AS Armchair,
 
@@ -766,10 +804,7 @@ class IdentConnector:
             ) lu
 
         WHERE
-            (
-                lu.LastUpdate > ?
-                OR (lu.LastUpdate = ? AND r.ID > ?)
-            )
+            {where_clause}
 
         ORDER BY lu.LastUpdate ASC, r.ID ASC
         """

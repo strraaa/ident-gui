@@ -392,13 +392,23 @@ class DataTransformer:
         Инициализация трансформера
 
         Args:
-            filial_id: ID филиала (1-10)
+            filial_id: ID филиала по умолчанию (1-10), используется если FilialID отсутствует в записи
         """
         if filial_id < 1 or filial_id > 10:
             raise ValueError(f"filial_id должен быть 1-10, получено: {filial_id}")
 
         self.filial_id = filial_id
-        logger.info(f"DataTransformer инициализирован для филиала {filial_id}")
+
+        # Читаем конфигурацию фильтрации филиалов для мультифилиальных БД
+        from src.config.config_manager_v2 import get_config
+        filial_config = get_config().get_filial_filter_config()
+        self.enabled_filial_ids = filial_config.get('enabled_filial_ids', [])
+        self.default_filial_id = filial_config.get('default_filial_id', 0)
+
+        if self.enabled_filial_ids:
+            logger.info(f"DataTransformer: филиал по умолчанию {filial_id}, фильтр филиалов: {self.enabled_filial_ids}")
+        else:
+            logger.info(f"DataTransformer инициализирован для филиала {filial_id}")
 
     def transform_reception(
         self,
@@ -429,9 +439,40 @@ class DataTransformer:
         for warning in validation.warnings:
             logger.warning(f"Запись {reception['ReceptionID']}: {warning}")
 
-        # Генерация уникального ID
+        # Определение FilialID для генерации уникального идентификатора
+        # Для мультифилиальных БД: FilialID берётся из записи (поле из OwnCompanies.ID)
+        # Если FilialID отсутствует (0), используется default_filial_id из конфига
+        filial_id_from_db = reception.get('FilialID', 0)
+
+        if filial_id_from_db == 0:
+            # Филиал не определён в БД - используем значение по умолчанию
+            if self.default_filial_id == 0:
+                # default_filial_id = 0 означает "пропускать записи без филиала"
+                logger.warning(
+                    f"Запись {reception['ReceptionID']}: FilialID не определён (0), "
+                    f"default_filial_id = 0 → пропускаем запись"
+                )
+                return None
+            else:
+                effective_filial_id = self.default_filial_id
+                logger.debug(
+                    f"Запись {reception['ReceptionID']}: FilialID не определён, "
+                    f"используем default_filial_id={self.default_filial_id}"
+                )
+        else:
+            effective_filial_id = filial_id_from_db
+
+        # Проверка на фильтр enabled_filial_ids (если задан)
+        if self.enabled_filial_ids and effective_filial_id not in self.enabled_filial_ids:
+            logger.debug(
+                f"Запись {reception['ReceptionID']}: FilialID={effective_filial_id} "
+                f"не в списке enabled_filial_ids={self.enabled_filial_ids} → пропускаем"
+            )
+            return None
+
+        # Генерация уникального ID с правильным FilialID
         unique_id = UniqueIdGenerator.generate_reception_id(
-            self.filial_id,
+            effective_filial_id,
             reception['ReceptionID']
         )
 
@@ -478,7 +519,7 @@ class DataTransformer:
         transformed = {
             # Идентификаторы
             'unique_id': unique_id,
-            'filial_id': self.filial_id,
+            'filial_id': effective_filial_id,  # Используем динамический FilialID из БД
             'ident_reception_id': reception['ReceptionID'],
 
             # Контакт (пациент)

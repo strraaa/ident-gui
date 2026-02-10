@@ -231,6 +231,26 @@ class ConfigManager:
                 if filial_id < 1 or filial_id > 10:
                     errors.append(f"Некорректный filial_id: {filial_id} (должен быть 1-10)")
 
+            # FilialFilter validation (опциональная секция для мультифилиальных БД)
+            if self.config.has_section('FilialFilter'):
+                # enabled_filial_ids
+                if self.config.has_option('FilialFilter', 'enabled_filial_ids'):
+                    enabled = self.config.get('FilialFilter', 'enabled_filial_ids', fallback='').strip()
+                    if enabled:  # Если не пустое
+                        try:
+                            ids = [int(x.strip()) for x in enabled.split(',') if x.strip()]
+                            for fid in ids:
+                                if fid < 1 or fid > 100:
+                                    errors.append(f"Некорректный ID филиала в enabled_filial_ids: {fid} (должен быть 1-100)")
+                        except ValueError:
+                            errors.append(f"enabled_filial_ids должен содержать числа через запятую: '{enabled}'")
+
+                # default_filial_id
+                if self.config.has_option('FilialFilter', 'default_filial_id'):
+                    default_fid = self.config.getint('FilialFilter', 'default_filial_id')
+                    if default_fid < 0 or default_fid > 100:
+                        errors.append(f"Некорректный default_filial_id: {default_fid} (должен быть 0-100)")
+
         except ValueError as e:
             errors.append(f"Ошибка типа данных в конфигурации: {e}")
 
@@ -557,6 +577,40 @@ class ConfigManager:
             'batch_size': self.config.getint('Sync', 'batch_size', fallback=50),
             'initial_days': initial_days,
             'enable_update_existing': self.config.getboolean('Sync', 'enable_update_existing', fallback=True),
+        }
+
+    def get_filial_filter_config(self) -> Dict[str, Any]:
+        """
+        Возвращает конфигурацию фильтрации филиалов для мультифилиальных БД.
+
+        Returns:
+            Dict с ключами:
+            - enabled_filial_ids: List[int] - список ID филиалов для синхронизации (пустой = все)
+            - default_filial_id: int - ID по умолчанию для записей без филиала (0 = пропускать)
+        """
+        if not self.config.has_section('FilialFilter'):
+            return {
+                'enabled_filial_ids': [],
+                'default_filial_id': 0,
+            }
+
+        # enabled_filial_ids
+        enabled_str = self.config.get('FilialFilter', 'enabled_filial_ids', fallback='').strip()
+        if enabled_str:
+            try:
+                enabled_ids = [int(x.strip()) for x in enabled_str.split(',') if x.strip()]
+            except ValueError:
+                # Если парсинг не удался - используем пустой список (синхронизировать все)
+                enabled_ids = []
+        else:
+            enabled_ids = []
+
+        # default_filial_id
+        default_fid = self.config.getint('FilialFilter', 'default_filial_id', fallback=0)
+
+        return {
+            'enabled_filial_ids': enabled_ids,
+            'default_filial_id': default_fid,
         }
 
     def get_logging_config(self) -> Dict[str, Any]:
