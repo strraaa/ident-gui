@@ -209,6 +209,30 @@ class Bitrix24Client:
             logger.info(f"Bitrix24Client инициализирован: {masked_url}")
 
     @staticmethod
+    def _normalize_phone(phone: str) -> str:
+        """
+        Нормализует телефон к формату +7XXXXXXXXXX (если это возможно).
+
+        Для нестандартных номеров возвращает очищенную строку (без пробелов/скобок/дефисов),
+        чтобы можно было безопасно использовать значение как ключ кеша/поиска.
+        """
+        if not phone or not isinstance(phone, str):
+            return ''
+
+        digits = ''.join(c for c in phone if c.isdigit())
+
+        if len(digits) == 11 and digits.startswith('8'):
+            return f'+7{digits[1:]}'
+        if len(digits) == 11 and digits.startswith('7'):
+            return f'+{digits}'
+        if len(digits) == 10:
+            return f'+7{digits}'
+
+        # Нестандартный формат: возвращаем "очищенную" версию исходного значения
+        cleaned = phone.strip().replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
+        return cleaned
+
+    @staticmethod
     def _require_value(value: Any, field_name: str) -> Any:
         """Базовая валидация обязательных полей."""
         if value is None:
@@ -245,8 +269,12 @@ class Bitrix24Client:
         if not phone or not isinstance(phone, str):
             return []
 
+        normalized = Bitrix24Client._normalize_phone(phone)
+        if not normalized:
+            return []
+
         # Извлекаем чистые цифры
-        digits = ''.join(c for c in phone if c.isdigit())
+        digits = ''.join(c for c in normalized if c.isdigit())
 
         # Для российских номеров (11 цифр начиная с 7)
         if len(digits) == 11 and digits.startswith('7'):
@@ -258,8 +286,8 @@ class Bitrix24Client:
                 f'+8{base_digits}'   # +89991234567 (+8)
             ]
 
-        # Если телефон уже в другом формате — возвращаем его + варианты
-        return [phone]
+        # Если телефон в нестандартном формате — возвращаем нормализованный вариант как есть
+        return [normalized]
 
     def _get_field_map(self) -> Dict[str, str]:
         from src.config.config_manager_v2 import get_config
