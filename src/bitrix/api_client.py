@@ -348,6 +348,35 @@ class Bitrix24Client:
             raise Bitrix24TransientError(f"Ошибка HTTP запроса: {e}")
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
+    def _find_contact_by_duplicate_api(self, phone: str) -> Optional[Dict[str, Any]]:
+        """
+        Ищет контакт через Duplicate API.
+        """
+        try:
+            normalized = self._normalize_phone(phone)
+            result = self._make_request(
+                'crm.duplicate.findbycomm',
+                {
+                    'type': 'PHONE',
+                    'values': [normalized],
+                    'entity_type': 'CONTACT'
+                }
+            )
+
+            duplicates = result.get('result', {})
+            contact_ids = duplicates.get('CONTACT', []) if isinstance(duplicates, dict) else []
+            if not contact_ids:
+                return None
+
+            contact_id = contact_ids[0]
+            contact_result = self._make_request('crm.contact.get', {'id': contact_id})
+            contact = contact_result.get('result')
+            return contact if isinstance(contact, dict) else None
+        except Exception as e:
+            logger.debug(f"Duplicate API error for {phone}: {e}")
+            return None
+
+    @retry_on_api_error()
     def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """
         Ищет первый контакт по телефону (с поддержкой разных форматов).
