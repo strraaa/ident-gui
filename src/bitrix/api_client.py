@@ -796,9 +796,11 @@ class Bitrix24Client:
             treatment_plan_field = field_map.get('treatment_plan')
             treatment_plan_hash_field = field_map.get('treatment_plan_hash')
 
+            # SAFETY: STAGE_ID is deliberately excluded from update payloads.
+            # Stage transitions must never happen implicitly via sync.
+            # Closed deals are immutable; stage changes require explicit business logic.
             fields = {
                 'TITLE': deal_data.get('title'),
-                'STAGE_ID': deal_data.get('stage_id'),
                 'OPPORTUNITY': deal_data.get('opportunity'),
 
                 # Кастомные поля (из конфига)
@@ -840,7 +842,7 @@ class Bitrix24Client:
             )
 
             # Логируем ключевые поля для диагностики "пустых" обновлений
-            key_fields = ['TITLE', 'STAGE_ID', 'OPPORTUNITY', deal_start_field, deal_doctor_field]
+            key_fields = ['TITLE', 'OPPORTUNITY', deal_start_field, deal_doctor_field]
             key_values = {k: fields.get(k, '<отсутствует>') for k in key_fields if k in fields}
             if key_values:
                 logger.debug(f"Ключевые поля сделки {deal_id}: {key_values}")
