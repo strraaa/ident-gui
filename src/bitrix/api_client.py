@@ -621,7 +621,13 @@ class Bitrix24Client:
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deal_by_ident_id(self, ident_id: str) -> Optional[Dict[str, Any]]:
-        """Ищет сделку по IDENT ID"""
+        """Ищет ОТКРЫТУЮ сделку по IDENT ID.
+
+        Если все сделки с данным IDENT ID закрыты (WON/LOSE), возвращает None —
+        вызывающий код создаст новую сделку вместо обновления закрытой.
+        """
+        from src.transformer.data_transformer import StageMapper
+
         field_map = self._get_field_map()
         ident_field = field_map.get('ident_field')
 
@@ -629,12 +635,25 @@ class Bitrix24Client:
             'crm.deal.list',
             {
                 'filter': {ident_field: ident_id},
-                'select': ['ID', 'STAGE_ID', 'CONTACT_ID', ident_field]
+                'select': ['ID', 'STAGE_ID', 'CONTACT_ID', ident_field],
+                'order': {'ID': 'DESC'}  # Newest first
             }
         )
 
         deals = result.get('result', [])
-        return deals[0] if deals else None
+
+        # Return the first non-closed deal; if all are closed → None
+        for deal in deals:
+            if not StageMapper.is_stage_final(deal.get('STAGE_ID')):
+                return deal
+
+        if deals:
+            logger.info(
+                f"Все сделки по IDENT ID {ident_id} закрыты "
+                f"({len(deals)} шт.), будет создана новая"
+            )
+
+        return None
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deals_by_contact_without_ident_id(
@@ -825,6 +844,15 @@ class Bitrix24Client:
             # ИСПРАВЛЕНИЕ: Удаляем None и пустые строки (бесполезные для Bitrix24)
             # Оставляем 0 и False (валидные значения)
             fields = self._clean_fields(fields)
+
+            # HARD GUARD: STAGE_ID must NEVER appear in update payloads.
+            # This is a last-resort safety net — even if caller passes it, we strip it.
+            if 'STAGE_ID' in fields:
+                logger.error(
+                    f"BLOCKED: Попытка обновить STAGE_ID сделки {deal_id}! "
+                    f"Значение '{fields['STAGE_ID']}' удалено из payload."
+                )
+                del fields['STAGE_ID']
 
             # ИСПРАВЛЕНИЕ: Логируем если поля пустые (помогает диагностировать "фантомные" обновления)
             if not fields:
@@ -1038,12 +1066,14 @@ class Bitrix24Client:
                 logger.error(f"Batch поиск сделок завершился ошибкой: {e}")
                 return {ident_id: None for ident_id in ident_ids}
 
-            # Парсим результаты для текущего чанка
+            # Парсим результаты для текущего чанка — пропускаем закрытые сделки
+            from src.transformer.data_transformer import StageMapper
             for ident_id in chunk:
                 if ident_id in results:
-                    # Результат уже является списком сделок
                     deal_list = results[ident_id] if isinstance(results[ident_id], list) else []
-                    deals[ident_id] = deal_list[0] if deal_list else None
+                    # Prefer non-closed deal; if all closed → None (will create new)
+                    non_final = [d for d in deal_list if not StageMapper.is_stage_final(d.get('STAGE_ID'))]
+                    deals[ident_id] = non_final[0] if non_final else None
                 else:
                     deals[ident_id] = None
 
