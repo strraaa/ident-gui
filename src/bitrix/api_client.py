@@ -621,10 +621,13 @@ class Bitrix24Client:
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deal_by_ident_id(self, ident_id: str) -> Optional[Dict[str, Any]]:
-        """Ищет ОТКРЫТУЮ сделку по IDENT ID.
+        """Ищет сделку по IDENT ID.
 
-        Если все сделки с данным IDENT ID закрыты (WON/LOSE), возвращает None —
-        вызывающий код создаст новую сделку вместо обновления закрытой.
+        Returns:
+            - Open deal dict (preferred, newest first) if any exist
+            - Closed deal dict with _is_closed=True if ONLY closed deals exist
+              (caller must not update it, but must not create a duplicate either)
+            - None if no deals exist at all
         """
         from src.transformer.data_transformer import StageMapper
 
@@ -642,18 +645,23 @@ class Bitrix24Client:
 
         deals = result.get('result', [])
 
-        # Return the first non-closed deal; if all are closed → None
+        if not deals:
+            return None
+
+        # Prefer open (non-final) deal
         for deal in deals:
             if not StageMapper.is_stage_final(deal.get('STAGE_ID')):
                 return deal
 
-        if deals:
-            logger.info(
-                f"Все сделки по IDENT ID {ident_id} закрыты "
-                f"({len(deals)} шт.), будет создана новая"
-            )
-
-        return None
+        # All deals are closed — return newest with marker so caller knows
+        # it must NOT create a duplicate, but also must NOT update
+        closed_deal = deals[0].copy()
+        closed_deal['_is_closed'] = True
+        logger.info(
+            f"Все сделки по IDENT ID {ident_id} закрыты "
+            f"({len(deals)} шт.), обновление и создание не требуются"
+        )
+        return closed_deal
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_deals_by_contact_without_ident_id(
@@ -1066,14 +1074,22 @@ class Bitrix24Client:
                 logger.error(f"Batch поиск сделок завершился ошибкой: {e}")
                 return {ident_id: None for ident_id in ident_ids}
 
-            # Парсим результаты для текущего чанка — пропускаем закрытые сделки
+            # Парсим результаты для текущего чанка
             from src.transformer.data_transformer import StageMapper
             for ident_id in chunk:
                 if ident_id in results:
                     deal_list = results[ident_id] if isinstance(results[ident_id], list) else []
-                    # Prefer non-closed deal; if all closed → None (will create new)
+                    # Prefer open (non-final) deal
                     non_final = [d for d in deal_list if not StageMapper.is_stage_final(d.get('STAGE_ID'))]
-                    deals[ident_id] = non_final[0] if non_final else None
+                    if non_final:
+                        deals[ident_id] = non_final[0]
+                    elif deal_list:
+                        # All closed — mark so caller skips (no update AND no duplicate)
+                        closed = deal_list[0].copy() if isinstance(deal_list[0], dict) else {'ID': deal_list[0]}
+                        closed['_is_closed'] = True
+                        deals[ident_id] = closed
+                    else:
+                        deals[ident_id] = None
                 else:
                     deals[ident_id] = None
 
