@@ -584,6 +584,36 @@ class Bitrix24Client:
         result = self._make_request('crm.deal.get', {'id': deal_id})
         return result.get('result')
 
+    @staticmethod
+    def _is_closed_flag(value: Any) -> bool:
+        """Parse Bitrix CLOSED marker (Y/N, true/false, 1/0)."""
+        if value is None:
+            return False
+        return str(value).strip().upper() in {'Y', 'YES', 'TRUE', '1'}
+
+    def _is_deal_closed(self, deal: Optional[Dict[str, Any]]) -> bool:
+        """
+        Determine if a deal is closed.
+        Prefer explicit CLOSED flag, fallback to STAGE_ID checks.
+        """
+        if not isinstance(deal, dict):
+            return False
+
+        closed_flag = deal.get('CLOSED')
+        if closed_flag not in (None, ''):
+            return self._is_closed_flag(closed_flag)
+
+        from src.transformer.data_transformer import StageMapper
+        stage_id = deal.get('STAGE_ID')
+        if StageMapper.is_stage_final(stage_id):
+            return True
+
+        # Support category-prefixed stages like C4:WON when config has WON.
+        if isinstance(stage_id, str) and ':' in stage_id:
+            return StageMapper.is_stage_final(stage_id.split(':', 1)[1])
+
+        return False
+
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def create_contact(self, contact_data: Dict[str, Any]) -> int:
         """Создает новый контакт"""
@@ -629,8 +659,6 @@ class Bitrix24Client:
               (caller must not update it, but must not create a duplicate either)
             - None if no deals exist at all
         """
-        from src.transformer.data_transformer import StageMapper
-
         field_map = self._get_field_map()
         ident_field = field_map.get('ident_field')
 
@@ -638,7 +666,7 @@ class Bitrix24Client:
             'crm.deal.list',
             {
                 'filter': {ident_field: ident_id},
-                'select': ['ID', 'STAGE_ID', 'CONTACT_ID', ident_field],
+                'select': ['ID', 'STAGE_ID', 'CLOSED', 'CONTACT_ID', ident_field],
                 'order': {'ID': 'DESC'}  # Newest first
             }
         )
@@ -648,9 +676,9 @@ class Bitrix24Client:
         if not deals:
             return None
 
-        # Prefer open (non-final) deal
+        # Prefer open deal
         for deal in deals:
-            if not StageMapper.is_stage_final(deal.get('STAGE_ID')):
+            if not self._is_deal_closed(deal):
                 return deal
 
         # All deals are closed — return newest with marker so caller knows
@@ -670,8 +698,6 @@ class Bitrix24Client:
         exclude_final: bool = True
     ) -> List[Dict[str, Any]]:
         """Ищет сделки контакта без IDENT ID"""
-        from src.transformer.data_transformer import StageMapper
-
         field_map = self._get_field_map()
         ident_field = field_map.get('ident_field')
 
@@ -682,7 +708,7 @@ class Bitrix24Client:
                     'CONTACT_ID': contact_id,
                     f'={ident_field}': False
                 },
-                'select': ['ID', 'STAGE_ID', 'DATE_CREATE', ident_field],
+                'select': ['ID', 'STAGE_ID', 'CLOSED', 'DATE_CREATE', ident_field],
                 'order': {'DATE_CREATE': 'DESC'}
             }
         )
@@ -690,7 +716,7 @@ class Bitrix24Client:
         deals = result.get('result', [])
 
         if exclude_final:
-            deals = [d for d in deals if not StageMapper.is_stage_final(d.get('STAGE_ID'))]
+            deals = [d for d in deals if not self._is_deal_closed(d)]
 
         return deals
 
@@ -808,6 +834,15 @@ class Bitrix24Client:
         """
         try:
             # Формируем поля (аналогично create_deal)
+            live_deal = self.get_deal(deal_id)
+            if live_deal and self._is_deal_closed(live_deal):
+                logger.warning(
+                    f"BLOCKED: сделка {deal_id} закрыта "
+                    f"(STAGE_ID={live_deal.get('STAGE_ID')}, CLOSED={live_deal.get('CLOSED')}). "
+                    f"Обновление пропущено."
+                )
+                return True
+
             field_map = self._get_field_map()
 
             deal_start_field = field_map.get('deal_start')
@@ -1066,7 +1101,11 @@ class Bitrix24Client:
             # Формируем batch команды для текущего чанка
             commands = {}
             for ident_id in chunk:
-                commands[ident_id] = f"crm.deal.list?filter[{ident_field}]={ident_id}&select[]=ID&select[]=STAGE_ID&select[]=OPPORTUNITY&select[]={ident_field}"
+                commands[ident_id] = (
+                    f"crm.deal.list?filter[{ident_field}]={ident_id}"
+                    f"&select[]=ID&select[]=STAGE_ID&select[]=CLOSED&select[]=OPPORTUNITY&select[]={ident_field}"
+                    f"&order[ID]=DESC"
+                )
 
             try:
                 results = self.batch_execute(commands, raise_on_error=False)
@@ -1075,14 +1114,13 @@ class Bitrix24Client:
                 return {ident_id: None for ident_id in ident_ids}
 
             # Парсим результаты для текущего чанка
-            from src.transformer.data_transformer import StageMapper
             for ident_id in chunk:
                 if ident_id in results:
                     deal_list = results[ident_id] if isinstance(results[ident_id], list) else []
-                    # Prefer open (non-final) deal
-                    non_final = [d for d in deal_list if not StageMapper.is_stage_final(d.get('STAGE_ID'))]
-                    if non_final:
-                        deals[ident_id] = non_final[0]
+                    # Prefer open deal
+                    open_deals = [d for d in deal_list if not self._is_deal_closed(d)]
+                    if open_deals:
+                        deals[ident_id] = open_deals[0]
                     elif deal_list:
                         # All closed — mark so caller skips (no update AND no duplicate)
                         closed = deal_list[0].copy() if isinstance(deal_list[0], dict) else {'ID': deal_list[0]}
@@ -1093,8 +1131,13 @@ class Bitrix24Client:
                 else:
                     deals[ident_id] = None
 
-        logger.info(f"Batch поиск сделок: запрошено {len(ident_ids)}, найдено {sum(1 for d in deals.values() if d)}")
-
+        found_total = sum(1 for d in deals.values() if d)
+        found_open = sum(1 for d in deals.values() if d and not d.get('_is_closed'))
+        found_closed_only = sum(1 for d in deals.values() if d and d.get('_is_closed'))
+        logger.info(
+            f"Batch поиск сделок: запрошено {len(ident_ids)}, "
+            f"найдено {found_total} (открытых {found_open}, только закрытых {found_closed_only})"
+        )
         return deals
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
