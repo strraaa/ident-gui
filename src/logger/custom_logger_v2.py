@@ -190,14 +190,28 @@ class ThreadSafeLogger:
                     datefmt='%Y-%m-%d %H:%M:%S'
                 )
 
-            # ===== ФАЙЛОВЫЙ HANDLER (с ротацией по дате) =====
-            log_file = log_path / f"integration_log_{datetime.now().strftime('%Y-%m-%d')}.txt"
-            max_bytes = max(1, int(max_log_size_mb)) * 1024 * 1024
-            file_handler = logging.handlers.RotatingFileHandler(
+            # ===== ФАЙЛОВЫЙ HANDLER (суточная ротация в полночь) =====
+            # Раньше использовался RotatingFileHandler с датой в имени файла,
+            # вычисленной один раз при инициализации. Для долгоживущего процесса
+            # (run_scheduled) это приводило к тому, что все дни писались в один файл
+            # с датой первого запуска. TimedRotatingFileHandler ротирует в полночь.
+            # Параметры max_log_size_mb / max_backup_files больше не используются:
+            # суточная ротация делает size-ротацию избыточной для этого процесса.
+            log_file = log_path / "integration_log.txt"
+            file_handler = logging.handlers.TimedRotatingFileHandler(
                 log_file,
-                maxBytes=max_bytes,
-                backupCount=max(1, int(max_backup_files)),
+                when='midnight',
+                interval=1,
+                backupCount=max(1, int(rotation_days)),
                 encoding='utf-8'
+            )
+            # При ротации старый файл получает суффикс с датой.
+            # Дефолтное имя — integration_log.txt.YYYY-MM-DD; переименуем
+            # в integration_log_YYYY-MM-DD.txt, чтобы _cleanup_old_logs продолжал работать.
+            file_handler.suffix = "%Y-%m-%d"
+            file_handler.namer = lambda default_name: str(
+                Path(default_name).parent
+                / f"integration_log_{Path(default_name).name.rsplit('.', 1)[-1]}.txt"
             )
             file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(formatter)
