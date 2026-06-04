@@ -584,28 +584,143 @@ class Bitrix24Client:
         result = self._make_request('crm.lead.update', {'id': lead_id, 'fields': fields})
         return bool(result.get('result'))
 
+    @retry_on_api_error()
+    def trigger_lead_conversion(self, lead_id: int) -> bool:
+        """
+        Запускает бизнес-процесс конвертации лида в Bitrix24,
+        записывая ID лида в поле-триггер ([lead_fields].convert_trigger).
+        Сам БП в Bitrix создаёт сделку и пишет ID лида в [deal_fields].lead_source_id.
+        """
+        field_map = self._get_field_map()
+        trigger_field = field_map.get('lead_convert_trigger')
+        if not trigger_field:
+            raise ValueError("lead_convert_trigger is not configured in [lead_fields]")
+
+        fields = {trigger_field: str(lead_id)}
+        logger.info(f"Запуск конвертации лида {lead_id} через поле {trigger_field}")
+        return self.update_lead(lead_id, fields)
+
+    @retry_on_api_error()
+    def find_deal_by_lead_source_id(self, lead_id: int) -> Optional[Dict[str, Any]]:
+        """Ищет сделку по полю, куда БП записывает ID исходного лида."""
+        field_map = self._get_field_map()
+        lead_source_field = field_map.get('deal_lead_source_id')
+        if not lead_source_field:
+            raise ValueError("deal_lead_source_id is not configured in [deal_fields]")
+
+        result = self._make_request(
+            'crm.deal.list',
+            {
+                'filter': {lead_source_field: str(lead_id)},
+                'select': ['ID', 'STAGE_ID', lead_source_field],
+                'order': {'DATE_CREATE': 'DESC'}
+            }
+        )
+        deals = result.get('result', [])
+        return deals[0] if deals else None
+
+    def wait_for_deal_by_lead_source_id(
+        self,
+        lead_id: int,
+        timeout_seconds: int = 30,
+        poll_interval_seconds: float = 2.0
+    ) -> Optional[int]:
+        """
+        Поллит наличие сделки, созданной БП после конвертации лида.
+        Возвращает ID найденной сделки или None по истечении таймаута.
+        """
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be > 0")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be > 0")
+
+        start = time.time()
+        while (time.time() - start) <= timeout_seconds:
+            deal = self.find_deal_by_lead_source_id(lead_id)
+            if deal and deal.get('ID'):
+                deal_id = int(deal['ID'])
+                logger.info(f"Конвертация лида {lead_id} завершена, сделка {deal_id} найдена")
+                return deal_id
+            logger.debug(f"Ожидаем сделку по лиду {lead_id} ({poll_interval_seconds}s)...")
+            time.sleep(poll_interval_seconds)
+
+        logger.warning(f"Сделка по лиду {lead_id} не найдена за {timeout_seconds}s")
+        return None
+
     def convert_lead(self, lead_id: int, contact_id: int, deal_data: Dict[str, Any]) -> Optional[int]:
         """
-        Конвертирует лид в сделку: создаёт сделку и помечает лид как конвертированный.
+        Конвертирует лид в сделку.
 
-        crm.lead.convert не доступен в данном аккаунте (404), поэтому конвертация
-        реализована как три последовательных запроса:
-          1. crm.lead.get — читаем SOURCE_ID и SOURCE_DESCRIPTION из лида
-          2. crm.deal.add — создание сделки (с SOURCE_ID из лида)
-          3. crm.lead.update — установка STATUS_ID из конфига (closed[0])
+        Диспетчер с двумя путями:
+          1) Если в конфиге заданы и lead_convert_trigger ([lead_fields].convert_trigger),
+             и deal_lead_source_id ([deal_fields].lead_source_id) — идёт через БП Bitrix:
+             запись ID лида в поле-триггер → ожидание сделки → обновление сделки данными IDENT.
+          2) Иначе — ручной fallback: crm.deal.add + crm.lead.update(STATUS_ID=Converted).
 
-        Args:
-            lead_id: ID лида для конвертации
-            contact_id: ID контакта (уже существует)
-            deal_data: Поля сделки (передаются в create_deal)
-
-        Returns:
-            ID созданной сделки или None при ошибке
+        Это позволяет одним и тем же кодом работать и на порталах с настроенным БП,
+        и без него.
         """
-        # Копируем deal_data — convert_lead добавляет SOURCE_ID и не должен мутировать dict вызывающего
+        field_map = self._get_field_map()
+        trigger_field = field_map.get('lead_convert_trigger')
+        lead_source_field = field_map.get('deal_lead_source_id')
+
+        if trigger_field and lead_source_field:
+            return self._convert_lead_via_bp(lead_id, contact_id, deal_data)
+
+        logger.info(
+            f"Поля БП-конвертации не сконфигурированы "
+            f"(lead_convert_trigger={trigger_field!r}, deal_lead_source_id={lead_source_field!r}), "
+            f"используем ручную конвертацию"
+        )
+        return self._convert_lead_manual(lead_id, contact_id, deal_data)
+
+    def _convert_lead_via_bp(self, lead_id: int, contact_id: int, deal_data: Dict[str, Any]) -> Optional[int]:
+        """
+        Конвертация через бизнес-процесс Bitrix24.
+
+        1) trigger_lead_conversion(lead_id) — БП запускается на изменении поля-триггера.
+        2) wait_for_deal_by_lead_source_id(lead_id) — ждём сделку, которую создаёт БП.
+        3) update_deal — переносим в сделку данные из IDENT (без stage_id — стадией владеет БП).
+        """
+        try:
+            triggered = self.trigger_lead_conversion(lead_id)
+            if not triggered:
+                logger.warning(f"Не удалось записать триггер конвертации для лида {lead_id}")
+                return None
+
+            deal_id = self.wait_for_deal_by_lead_source_id(lead_id)
+            if not deal_id:
+                logger.warning(
+                    f"БП не создал сделку для лида {lead_id} в отведённое время. "
+                    f"Возможно, БП не настроен или не запустился."
+                )
+                return None
+
+            deal_data_copy = dict(deal_data)
+            deal_data_copy.pop('stage_id', None)  # стадией владеет БП
+
+            try:
+                self.update_deal(deal_id, deal_data_copy)
+                logger.info(f"Лид {lead_id} конвертирован через БП, сделка {deal_id} обновлена данными IDENT")
+            except Bitrix24Error as e:
+                logger.warning(f"Сделка {deal_id} создана БП, но обновление данными IDENT не удалось: {e}")
+
+            return deal_id
+
+        except Exception as e:
+            logger.error(f"Ошибка конвертации лида {lead_id} через БП: {e}", exc_info=True)
+            return None
+
+    def _convert_lead_manual(self, lead_id: int, contact_id: int, deal_data: Dict[str, Any]) -> Optional[int]:
+        """
+        Ручной fallback: используется, если БП-поля не сконфигурированы.
+
+        1) crm.lead.get — читаем SOURCE_ID и SOURCE_DESCRIPTION из лида
+        2) crm.deal.add — создание сделки (с SOURCE_ID из лида)
+        3) crm.lead.update — установка STATUS_ID из конфига (closed, ищем 'CONVERT*')
+        """
         deal_data = dict(deal_data)
 
-        # Читаем лид для переноса SOURCE_ID в сделку
         lead = self.get_lead(lead_id)
         if lead:
             for field in ('SOURCE_ID', 'SOURCE_DESCRIPTION'):
@@ -615,13 +730,11 @@ class Bitrix24Client:
                     logger.debug(f"Перенос из лида {lead_id}: {field}={value}")
 
         deal_id = self.create_deal(deal_data, contact_id)
-
         if not deal_id:
             logger.warning(f"Конвертация лида {lead_id}: create_deal не вернул ID сделки")
             return None
 
         try:
-            # STATUS_ID берём из конфига (closed содержит CONVERTED) — значение case-sensitive
             from src.config.config_manager_v2 import get_config
             closed = get_config().get_lead_status_config().get('closed', [])
             converted_status = next((s for s in closed if 'CONVERT' in s.upper()), 'Converted')
@@ -629,7 +742,6 @@ class Bitrix24Client:
             self.update_lead(lead_id, {'STATUS_ID': converted_status})
             logger.info(f"Лид {lead_id} конвертирован в сделку {deal_id} (статус={converted_status})")
         except Bitrix24Error as e:
-            # Сделка уже создана — не откатываем, просто логируем
             logger.warning(f"Сделка {deal_id} создана, но обновление статуса лида {lead_id} не удалось: {e}")
 
         return deal_id
