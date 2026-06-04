@@ -405,6 +405,48 @@ class Bitrix24Client:
             return None
 
     @retry_on_api_error()
+    def _find_lead_by_duplicate_api(self, phone: str) -> Optional[Dict[str, Any]]:
+        """
+        Ищет лид через crm.duplicate.findbycomm (entity_type=LEAD).
+
+        В отличие от crm.lead.list?filter[PHONE]=..., этот метод находит лиды
+        и в случае, когда телефон записан непосредственно в самом лиде
+        (CONTACT_ID может отсутствовать). Возвращает первый не-закрытый лид.
+        """
+        try:
+            normalized = self._normalize_phone(phone)
+            result = self._make_request(
+                'crm.duplicate.findbycomm',
+                {
+                    'type': 'PHONE',
+                    'values': [normalized],
+                    'entity_type': 'LEAD'
+                }
+            )
+
+            duplicates = result.get('result', {})
+            lead_ids = duplicates.get('LEAD', []) if isinstance(duplicates, dict) else []
+            if not lead_ids:
+                return None
+
+            from src.config.config_manager_v2 import get_config
+            closed_statuses = set(get_config().get_lead_status_config().get('closed', []))
+
+            for lead_id in lead_ids:
+                lead_result = self._make_request('crm.lead.get', {'id': lead_id})
+                lead = lead_result.get('result')
+                if not isinstance(lead, dict):
+                    continue
+                if lead.get('STATUS_ID') in closed_statuses:
+                    continue
+                return lead
+
+            return None
+        except Exception as e:
+            logger.debug(f"Duplicate API (LEAD) error for {phone}: {e}")
+            return None
+
+    @retry_on_api_error()
     def find_contact_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """
         Ищет первый контакт по телефону (с поддержкой разных форматов).
@@ -476,15 +518,29 @@ class Bitrix24Client:
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def find_lead_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
         """
-        Ищет первый лид по телефону
+        Ищет первый лид по телефону.
 
-        ВАЖНО: filter[PHONE] для лидов НЕ РАБОТАЕТ если телефон в контакте!
-        Поэтому ищем через контакт: phone → CONTACT_ID → lead
+        Двухпроходный поиск:
+        1) Прямой поиск через crm.duplicate.findbycomm (entity_type=LEAD) —
+           находит лиды, у которых телефон записан в самом лиде, даже без контакта.
+        2) Fallback: ищем контакт по телефону и берём лид по CONTACT_ID
+           (filter[PHONE] для crm.lead.list ненадёжен, поэтому именно через контакт).
+
+        Закрытые статусы (см. [lead_statuses].closed) исключаются.
         """
         phone = self._require_value(phone, 'phone')
         logger.debug(f"Поиск лида по телефону: {phone}")
 
-        # Сначала ищем контакт
+        # 1) Прямой поиск через Duplicate API
+        direct_lead = self._find_lead_by_duplicate_api(phone)
+        if direct_lead:
+            logger.debug(
+                f"Лид {direct_lead.get('ID')} найден через Duplicate API "
+                f"(STATUS_ID={direct_lead.get('STATUS_ID')}, CONTACT_ID={direct_lead.get('CONTACT_ID')})"
+            )
+            return direct_lead
+
+        # 2) Fallback: через контакт
         contact = self.find_contact_by_phone(phone)
         if not contact:
             logger.debug(f"Контакт не найден для {phone}")
@@ -1196,12 +1252,16 @@ class Bitrix24Client:
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_find_leads_by_phones(self, phones: List[str], contacts_map: Optional[Dict[str, Optional[Dict[str, Any]]]] = None) -> Dict[str, Optional[Dict[str, Any]]]:
         """
-        BATCH ОПТИМИЗАЦИЯ: Ищет несколько лидов по телефонам
+        BATCH ОПТИМИЗАЦИЯ: Ищет несколько лидов по телефонам.
 
-        ВАЖНО: filter[PHONE] для лидов НЕ РАБОТАЕТ если телефон в контакте!
-        Поэтому используем двухэтапный поиск:
-        1. Находим контакты по телефонам (если не переданы)
-        2. Ищем лиды по CONTACT_ID из найденных контактов
+        Двухпроходный поиск:
+        1) Batch crm.duplicate.findbycomm (entity_type=LEAD) по каждому телефону
+           через batch_execute — находит лиды с телефоном, записанным
+           непосредственно в самом лиде (даже без контакта).
+        2) Для телефонов, по которым прямой поиск ничего не дал — старый путь
+           через контакт: phone → CONTACT_ID → crm.lead.list?filter[CONTACT_ID]=...
+
+        Закрытые статусы (см. [lead_statuses].closed) исключаются.
 
         Args:
             phones: Список телефонов
@@ -1213,46 +1273,120 @@ class Bitrix24Client:
         if not phones:
             return {}
 
-        # Если контакты не переданы - находим сами
-        if contacts_map is None:
-            logger.debug("Контакты не переданы, ищем самостоятельно")
-            contacts_map = self.batch_find_contacts_by_phones(phones)
+        from src.config.config_manager_v2 import get_config
+        closed_statuses = set(get_config().get_lead_status_config().get('closed', []))
 
-        # Собираем CONTACT_ID из найденных контактов
-        phone_to_contact_id = {}
-        contact_ids = []
+        leads: Dict[str, Optional[Dict[str, Any]]] = {phone: None for phone in phones}
 
-        for phone in phones:
-            contact = contacts_map.get(phone)
-            if contact and contact.get('ID'):
+        # 1) Batch прямой поиск через Duplicate API (entity_type=LEAD)
+        #    crm.duplicate.findbycomm вызывается отдельно на каждый телефон,
+        #    но всё уезжает одним HTTP-запросом через batch_execute (чанками по 50).
+        direct_lead_ids: Dict[str, List[int]] = {}
+        for i in range(0, len(phones), 50):
+            chunk = phones[i:i + 50]
+            commands = {}
+            for phone in chunk:
                 try:
-                    contact_id = int(contact['ID'])
-                    phone_to_contact_id[phone] = contact_id
-                    contact_ids.append(contact_id)
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Некорректный CONTACT_ID для {phone}: {contact.get('ID')} - {e}")
+                    normalized = self._normalize_phone(phone)
+                except Exception:
+                    normalized = phone
+                safe_value = quote(normalized, safe='')
+                commands[phone] = (
+                    f"crm.duplicate.findbycomm?type=PHONE"
+                    f"&entity_type=LEAD&values[]={safe_value}"
+                )
+
+            try:
+                results = self.batch_execute(commands, raise_on_error=False)
+            except Bitrix24Error as e:
+                logger.warning(f"Batch Duplicate API (LEAD) завершился ошибкой: {e}")
+                results = {}
+
+            for phone in chunk:
+                payload = results.get(phone)
+                lead_ids: List[int] = []
+                if isinstance(payload, dict):
+                    raw_ids = payload.get('LEAD', []) or []
+                    for raw_id in raw_ids:
+                        try:
+                            lead_ids.append(int(raw_id))
+                        except (ValueError, TypeError):
+                            continue
+                if lead_ids:
+                    direct_lead_ids[phone] = lead_ids
+
+        # Дочитываем лиды одним батчем
+        unique_lead_ids = sorted({lid for ids in direct_lead_ids.values() for lid in ids})
+        lead_details: Dict[int, Dict[str, Any]] = {}
+        for i in range(0, len(unique_lead_ids), 50):
+            chunk = unique_lead_ids[i:i + 50]
+            commands = {str(lid): f"crm.lead.get?id={lid}" for lid in chunk}
+            try:
+                results = self.batch_execute(commands, raise_on_error=False)
+            except Bitrix24Error as e:
+                logger.warning(f"Batch crm.lead.get завершился ошибкой: {e}")
+                results = {}
+            for lid in chunk:
+                lead = results.get(str(lid))
+                if isinstance(lead, dict) and lead.get('ID'):
+                    lead_details[lid] = lead
+
+        # Заполняем результат по телефонам, по которым нашли «прямой» лид
+        for phone, lead_ids in direct_lead_ids.items():
+            for lid in lead_ids:
+                lead = lead_details.get(lid)
+                if not lead:
+                    continue
+                if lead.get('STATUS_ID') in closed_statuses:
+                    continue
+                leads[phone] = lead
+                break
+
+        direct_found = sum(1 for v in leads.values() if v)
+        logger.debug(f"Batch Duplicate API (LEAD): найдено {direct_found}/{len(phones)} прямых совпадений")
+
+        # 2) Fallback через контакт — только для тех телефонов, где прямой поиск ничего не дал
+        fallback_phones = [phone for phone in phones if leads[phone] is None]
+        if fallback_phones:
+            if contacts_map is None:
+                logger.debug("Контакты не переданы, ищем самостоятельно")
+                contacts_map = self.batch_find_contacts_by_phones(fallback_phones)
+
+            phone_to_contact_id: Dict[str, Optional[int]] = {}
+            contact_ids: List[int] = []
+
+            for phone in fallback_phones:
+                contact = contacts_map.get(phone)
+                if contact and contact.get('ID'):
+                    try:
+                        contact_id = int(contact['ID'])
+                        phone_to_contact_id[phone] = contact_id
+                        contact_ids.append(contact_id)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Некорректный CONTACT_ID для {phone}: {contact.get('ID')} - {e}")
+                        phone_to_contact_id[phone] = None
+                else:
                     phone_to_contact_id[phone] = None
+
+            logger.debug(
+                f"Fallback: из {len(fallback_phones)} телефонов найдено "
+                f"{len(contact_ids)} контактов с ID"
+            )
+
+            if contact_ids:
+                leads_by_contact_id = self.batch_find_leads_by_contact_ids(contact_ids)
             else:
-                phone_to_contact_id[phone] = None
+                leads_by_contact_id = {}
 
-        logger.debug(f"Из {len(phones)} телефонов найдено {len(contact_ids)} контактов с ID")
+            for phone in fallback_phones:
+                contact_id = phone_to_contact_id.get(phone)
+                if contact_id:
+                    leads[phone] = leads_by_contact_id.get(contact_id)
 
-        # Ищем лиды по CONTACT_ID
-        if contact_ids:
-            leads_by_contact_id = self.batch_find_leads_by_contact_ids(contact_ids)
-        else:
-            leads_by_contact_id = {}
-
-        # Формируем результат: {phone: lead_data}
-        leads = {}
-        for phone in phones:
-            contact_id = phone_to_contact_id.get(phone)
-            if contact_id:
-                leads[phone] = leads_by_contact_id.get(contact_id)
-            else:
-                leads[phone] = None
-
-        logger.info(f"Batch поиск лидов: запрошено {len(phones)}, найдено {sum(1 for l in leads.values() if l)}")
+        logger.info(
+            f"Batch поиск лидов: запрошено {len(phones)}, найдено {sum(1 for l in leads.values() if l)} "
+            f"(прямых через Duplicate API: {direct_found})"
+        )
 
         return leads
 
