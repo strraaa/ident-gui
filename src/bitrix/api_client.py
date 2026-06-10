@@ -680,7 +680,8 @@ class Bitrix24Client:
 
         1) trigger_lead_conversion(lead_id) — БП запускается на изменении поля-триггера.
         2) wait_for_deal_by_lead_source_id(lead_id) — ждём сделку, которую создаёт БП.
-        3) update_deal — переносим в сделку данные из IDENT (без stage_id — стадией владеет БП).
+        3) ensure_deal_contact — гарантируем привязку контакта (БП мог не перенести CONTACT_ID).
+        4) update_deal — переносим в сделку данные из IDENT (без stage_id — стадией владеет БП).
         """
         try:
             triggered = self.trigger_lead_conversion(lead_id)
@@ -695,6 +696,9 @@ class Bitrix24Client:
                     f"Возможно, БП не настроен или не запустился."
                 )
                 return None
+
+            # БП конвертации мог создать сделку без CONTACT_ID — привязываем явно
+            self.ensure_deal_contact(deal_id, contact_id)
 
             deal_data_copy = dict(deal_data)
             deal_data_copy.pop('stage_id', None)  # стадией владеет БП
@@ -1100,6 +1104,51 @@ class Bitrix24Client:
         except Bitrix24Error as e:
             logger.error(f"Ошибка обновления сделки {deal_id}: {e}")
             raise
+
+    @retry_on_api_error()
+    def ensure_deal_contact(
+        self,
+        deal_id: int,
+        contact_id: int,
+        deal: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Гарантирует, что к сделке привязан контакт.
+
+        Нужен после конвертации лида бизнес-процессом: БП может создать сделку,
+        не перенеся CONTACT_ID лида. Тогда сделка остаётся без контакта.
+        Если у сделки уже есть контакт — ничего не меняем (не перетираем БП/ручную привязку).
+
+        Args:
+            deal_id: ID сделки
+            contact_id: ID контакта, который нужно привязать при отсутствии
+            deal: уже полученные данные сделки (опционально, чтобы не делать лишний get_deal)
+
+        Returns:
+            True если контакт привязан или уже был привязан
+        """
+        if not contact_id:
+            logger.warning(f"ensure_deal_contact: пустой contact_id для сделки {deal_id}, пропуск")
+            return False
+
+        try:
+            current = deal if deal is not None else self.get_deal(deal_id)
+            existing = (current or {}).get('CONTACT_ID')
+
+            # Bitrix24 отдаёт '0' или '' / None, когда контакт не привязан
+            if existing and str(existing) not in ('0', ''):
+                logger.debug(f"Сделка {deal_id} уже имеет контакт {existing}, привязка не требуется")
+                return True
+
+            # Привязываем напрямую через crm.deal.update (минуя guard update_deal,
+            # т.к. привязка контакта безопасна даже для закрытых сделок)
+            self._make_request('crm.deal.update', {'id': deal_id, 'fields': {'CONTACT_ID': contact_id}})
+            logger.info(f"✓ Привязан контакт {contact_id} к сделке {deal_id} (после конвертации лида)")
+            return True
+
+        except Bitrix24Error as e:
+            logger.error(f"Не удалось привязать контакт {contact_id} к сделке {deal_id}: {e}")
+            return False
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
     def batch_execute(self, commands: Dict[str, str], halt_on_error: bool = False, raise_on_error: bool = True) -> Dict[str, Any]:
