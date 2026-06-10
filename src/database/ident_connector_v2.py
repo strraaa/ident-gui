@@ -545,6 +545,9 @@ class IdentConnector:
             -- Комментарий
             r.Comment AS Comment,
 
+            -- Регистратор записи (кто завёл запись на приём = ответственный за запись)
+            r.ID_StaffsReceptionAdded AS RegistrarStaffId,
+
             -- Метки времени для инкрементальной синхронизации
             r.DateTimeAdded AS CreatedAt,
             r.DateTimeChanged AS ChangedAt,
@@ -758,6 +761,9 @@ class IdentConnector:
 
             -- Комментарий
             r.Comment AS Comment,
+
+            -- Регистратор записи (кто завёл запись на приём = ответственный за запись)
+            r.ID_StaffsReceptionAdded AS RegistrarStaffId,
 
             -- Метки времени для инкрементальной синхронизации
             r.DateTimeAdded AS CreatedAt,

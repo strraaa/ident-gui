@@ -921,6 +921,7 @@ class Bitrix24Client:
             legacy_card_field = field_map.get('legacy_card_number') or None
             order_date_field = field_map.get('order_date') or None
             doctor_speciality_field = field_map.get('doctor_speciality') or None
+            registrar_field = field_map.get('deal_registrar') or None
 
             from src.config.config_manager_v2 import get_config
             default_stage = get_config().get_deal_defaults().get('default_stage_id')
@@ -951,6 +952,8 @@ class Bitrix24Client:
                 **({legacy_card_field: deal_data.get('uf_crm_card_number')} if legacy_card_field else {}),
                 **({order_date_field: deal_data.get('uf_crm_order_date')} if order_date_field else {}),
                 **({doctor_speciality_field: deal_data.get('uf_crm_doctor_speciality')} if doctor_speciality_field else {}),
+                # ID регистратора Ident (ответственный за запись) — только при создании
+                **({registrar_field: deal_data.get('uf_crm_registrar_id')} if registrar_field else {}),
 
                 # План лечения
                 treatment_plan_field: deal_data.get('uf_crm_treatment_plan'),  # JSON плана лечения

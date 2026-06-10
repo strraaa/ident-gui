@@ -557,7 +557,8 @@ class DataTransformer:
                 'uf_crm_status': reception.get('Status', 'Запланирован'),
                 'uf_crm_card_number': reception.get('CardNumber', ''),
                 'uf_crm_order_date': order_date_iso,
-                'uf_crm_doctor_speciality': reception.get('Speciality', '')
+                'uf_crm_doctor_speciality': reception.get('Speciality', ''),
+                'uf_crm_registrar_id': reception.get('RegistrarStaffId')  # ID регистратора (ответственный за запись)
             }
         }
 
@@ -661,6 +662,7 @@ if __name__ == "__main__":
         'TotalAmount': 5500.00,
         'Status': 'Запланирован',
         'Comment': 'Первичный прием',
+        'RegistrarStaffId': 42,
         'OrderDate': datetime(2024, 1, 10, 10, 0)
     }
 

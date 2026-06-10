@@ -521,6 +521,7 @@ class ConfigManager:
             'legacy_card_number': self.config.get('deal_fields', 'legacy_card_number', fallback=''),
             'order_date': self.config.get('deal_fields', 'order_date', fallback=''),
             'doctor_speciality': self.config.get('deal_fields', 'doctor_speciality', fallback=''),
+            'deal_registrar': self.config.get('deal_fields', 'registrar_id', fallback=''),
         }
 
     def get_stage_config(self) -> Dict[str, Any]:
