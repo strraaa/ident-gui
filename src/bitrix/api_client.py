@@ -697,8 +697,11 @@ class Bitrix24Client:
                 )
                 return None
 
-            # БП конвертации мог создать сделку без CONTACT_ID — привязываем явно
-            self.ensure_deal_contact(deal_id, contact_id)
+            # БП мог создать сделку без CONTACT_ID и без регистратора (минуя create_deal) —
+            # дозаполняем явно. Одним get_deal на обе проверки.
+            bp_deal = self.get_deal(deal_id)
+            self.ensure_deal_contact(deal_id, contact_id, deal=bp_deal)
+            self.ensure_deal_registrar(deal_id, deal_data.get('uf_crm_registrar_id'), deal=bp_deal)
 
             deal_data_copy = dict(deal_data)
             deal_data_copy.pop('stage_id', None)  # стадией владеет БП
@@ -1148,6 +1151,55 @@ class Bitrix24Client:
 
         except Bitrix24Error as e:
             logger.error(f"Не удалось привязать контакт {contact_id} к сделке {deal_id}: {e}")
+            return False
+
+    @retry_on_api_error()
+    def ensure_deal_registrar(
+        self,
+        deal_id: int,
+        registrar_id: Any,
+        deal: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Заполняет поле регистратора (ID_StaffsReceptionAdded) в сделке, если оно пустое.
+
+        Нужен после конвертации лида: сделку создаёт БП, а не create_deal, поэтому
+        регистратор туда не попадает (update_deal это поле намеренно не шлёт —
+        правило «только при создании»). Здесь дозаполняем один раз, только если пусто,
+        чтобы не перетирать ручные правки на последующих синхронизациях.
+
+        Args:
+            deal_id: ID сделки
+            registrar_id: ID сотрудника-регистратора из Ident
+            deal: уже полученные данные сделки (опционально, чтобы не делать лишний get_deal)
+
+        Returns:
+            True если поле заполнено или уже было заполнено
+        """
+        if registrar_id in (None, '', 0, '0'):
+            logger.debug(f"ensure_deal_registrar: пустой registrar_id для сделки {deal_id}, пропуск")
+            return False
+
+        field_map = self._get_field_map()
+        registrar_field = field_map.get('deal_registrar')
+        if not registrar_field:
+            logger.debug("ensure_deal_registrar: поле deal_registrar не сконфигурировано, пропуск")
+            return False
+
+        try:
+            current = deal if deal is not None else self.get_deal(deal_id)
+            existing = (current or {}).get(registrar_field)
+
+            if existing not in (None, '', 0, '0'):
+                logger.debug(f"Сделка {deal_id} уже имеет регистратора {existing}, заполнение не требуется")
+                return True
+
+            self._make_request('crm.deal.update', {'id': deal_id, 'fields': {registrar_field: registrar_id}})
+            logger.info(f"✓ Заполнен регистратор {registrar_id} в сделке {deal_id} (после конвертации лида)")
+            return True
+
+        except Bitrix24Error as e:
+            logger.error(f"Не удалось заполнить регистратора {registrar_id} в сделке {deal_id}: {e}")
             return False
 
     @retry_on_api_error()  # ИСПРАВЛЕНИЕ: Используем дефолтные значения (max_attempts=5, delay=2.0, backoff=2.5)
