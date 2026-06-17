@@ -263,10 +263,12 @@ class ConfigManager:
         # 3.1 Валидация Bitrix24-констант (стадии/поля)
         required_sections = {
             'contact_fields': ['card_number', 'parent_name'],
+            'lead_fields': ['convert_trigger'],
             'deal_fields': [
                 'ident_id', 'start_time', 'end_time', 'doctor_name', 'services',
                 'status', 'card_number', 'parent_name', 'comment', 'filial',
-                'armchair', 'status_text', 'treatment_plan', 'treatment_plan_hash'
+                'armchair', 'status_text', 'treatment_plan', 'treatment_plan_hash',
+                'lead_source_id'
             ],
             'deal_defaults': ['default_stage_id'],
             'deal_stages': ['mapping', 'final', 'protected'],
@@ -503,6 +505,8 @@ class ConfigManager:
         """Возвращает маппинг логических имён полей → фактические UF_CRM имена"""
         return {
             'ident_field': self.config.get('deal_fields', 'ident_id'),
+            'lead_convert_trigger': self.config.get('lead_fields', 'convert_trigger'),
+            'deal_lead_source_id': self.config.get('deal_fields', 'lead_source_id'),
             'contact_card_number': self.config.get('contact_fields', 'card_number'),
             'contact_parent': self.config.get('contact_fields', 'parent_name'),
             'deal_start': self.config.get('deal_fields', 'start_time'),
