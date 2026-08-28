@@ -387,6 +387,17 @@ class DataTransformer:
     Главный класс для преобразования данных Ident → Bitrix24
     """
 
+    # Ключи уже выданных предупреждений о ненастроенных полях (см. _warn_once)
+    _warned_keys: set = set()
+
+    @staticmethod
+    def _warn_once(key: str, message: str) -> None:
+        """Пишет предупреждение в лог один раз за запуск процесса"""
+        if key in DataTransformer._warned_keys:
+            return
+        DataTransformer._warned_keys.add(key)
+        logger.warning(message)
+
     def __init__(self, filial_id: int):
         """
         Инициализация трансформера
@@ -517,6 +528,55 @@ class DataTransformer:
         deal_comment_field = field_map.get('deal_comment')
         deal_cancel_reason_field = field_map.get('deal_cancel_reason') or None
         deal_cancel_reason_comment_field = field_map.get('deal_cancel_reason_comment') or None
+        deal_transfer_from_field = field_map.get('deal_transfer_from') or None
+
+        # Перенос записи: unique_id исходной записи в том же формате, что и ident_id
+        # (F{филиал}_{ID}), поэтому предыдущая сделка ищется по uf_crm_ident_id напрямую.
+        # Филиал берём у источника, а не текущий: перенос может быть межфилиальным.
+        transfer_src_id = reception.get('TransferFromReceptionId')
+        transfer_from_unique_id = ''
+        if transfer_src_id:
+            transfer_src_filial = reception.get('TransferFromFilialId')
+            if not transfer_src_filial:
+                # Филиал источника не определился (нет ни заказа, ни кресла) — ссылку не строим:
+                # F0_123 указывал бы в никуда и создал бы ложную связь.
+                DataTransformer._warn_once(
+                    'transfer_no_filial',
+                    f"Перенос из записи {transfer_src_id}: не удалось определить филиал "
+                    f"источника, ссылка «Перенесена из записи» не выгружается"
+                )
+            else:
+                transfer_from_unique_id = UniqueIdGenerator.generate_reception_id(
+                    int(transfer_src_filial), int(transfer_src_id)
+                )
+
+        # Один и тот же UF_CRM ID у причины и комментария: в payload оба поля лежат в одном
+        # словаре, комментарий идёт вторым и затирает причину. Если комментарий при этом пуст,
+        # _clean_fields выбрасывает ключ целиком — в Bitrix24 не уезжает ничего, и без ошибок.
+        if (deal_cancel_reason_field
+                and deal_cancel_reason_field == deal_cancel_reason_comment_field):
+            DataTransformer._warn_once(
+                'cancel_reason_same_field',
+                f"[deal_fields] cancel_reason_name и cancel_reason_comment указывают на одно "
+                f"поле {deal_cancel_reason_field} — причина отмены будет затёрта комментарием. "
+                f"Задайте разные UF_CRM ID; причина не выгружается."
+            )
+            deal_cancel_reason_field = None
+
+        # Ident прислал причину отмены, но поле портала не настроено — данные будут потеряны молча.
+        # Предупреждаем один раз за запуск, иначе лог захлебнётся на каждой отменённой записи.
+        if reception.get('CancelReasonName') and not deal_cancel_reason_field:
+            DataTransformer._warn_once(
+                'cancel_reason',
+                "Ident прислал причину отмены приёма, но [deal_fields] cancel_reason_name "
+                "не задан в config.ini — причина НЕ выгружается в Bitrix24"
+            )
+        if reception.get('CancelReasonComment') and not deal_cancel_reason_comment_field:
+            DataTransformer._warn_once(
+                'cancel_reason_comment',
+                "Ident прислал комментарий к отмене приёма, но [deal_fields] cancel_reason_comment "
+                "не задан в config.ini — комментарий НЕ выгружается в Bitrix24"
+            )
 
         transformed = {
             # Идентификаторы
@@ -557,6 +617,12 @@ class DataTransformer:
                    if deal_cancel_reason_field else {}),  # Причина отмены (справочник Ident)
                 **({deal_cancel_reason_comment_field: reception.get('CancelReasonComment') or ''}
                    if deal_cancel_reason_comment_field else {}),  # Комментарий к отмене
+
+                # Перенос записи (поле опционально: без ID в конфиге не выгружается).
+                # Причину отмены источника отдельно не пишем — она уже есть в самой сделке
+                # исходной записи, которую находят по этой ссылке.
+                **({deal_transfer_from_field: transfer_from_unique_id}
+                   if deal_transfer_from_field else {}),  # unique_id исходной записи
 
                 # Дополнительная информация (в комментарии)
                 'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)

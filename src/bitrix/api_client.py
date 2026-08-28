@@ -921,6 +921,7 @@ class Bitrix24Client:
             deal_comment_field = field_map.get('deal_comment')
             deal_cancel_reason_field = field_map.get('deal_cancel_reason') or None
             deal_cancel_reason_comment_field = field_map.get('deal_cancel_reason_comment') or None
+            deal_transfer_from_field = field_map.get('deal_transfer_from') or None
             ident_field = field_map.get('ident_field')
             filial_field = field_map.get('filial')
             armchair_field = field_map.get('armchair')
@@ -958,6 +959,10 @@ class Bitrix24Client:
                    if deal_cancel_reason_field else {}),  # Причина отмены
                 **({deal_cancel_reason_comment_field: deal_data.get(deal_cancel_reason_comment_field)}
                    if deal_cancel_reason_comment_field else {}),  # Комментарий к отмене
+
+                # Перенос записи (поле опционально: без ID в конфиге не выгружается)
+                **({deal_transfer_from_field: deal_data.get(deal_transfer_from_field)}
+                   if deal_transfer_from_field else {}),  # Перенесена из записи
 
                 # Дополнительные поля (для внутреннего использования)
                 ident_field: deal_data.get('uf_crm_ident_id'),  # ID из Ident
@@ -1041,6 +1046,7 @@ class Bitrix24Client:
             deal_comment_field = field_map.get('deal_comment')
             deal_cancel_reason_field = field_map.get('deal_cancel_reason') or None
             deal_cancel_reason_comment_field = field_map.get('deal_cancel_reason_comment') or None
+            deal_transfer_from_field = field_map.get('deal_transfer_from') or None
             ident_field = field_map.get('ident_field')
             status_field = field_map.get('status_field')
             treatment_plan_field = field_map.get('treatment_plan')
@@ -1068,6 +1074,10 @@ class Bitrix24Client:
                    if deal_cancel_reason_field else {}),  # Причина отмены
                 **({deal_cancel_reason_comment_field: deal_data.get(deal_cancel_reason_comment_field)}
                    if deal_cancel_reason_comment_field else {}),  # Комментарий к отмене
+
+                # Перенос записи (поле опционально: без ID в конфиге не выгружается)
+                **({deal_transfer_from_field: deal_data.get(deal_transfer_from_field)}
+                   if deal_transfer_from_field else {}),  # Перенесена из записи
 
                 # Дополнительные поля (для внутреннего использования)
                 ident_field: deal_data.get('uf_crm_ident_id'),  # ID из Ident
@@ -1621,6 +1631,118 @@ class Bitrix24Client:
         )
 
         return leads
+
+    # ------------------------------------------------------------------
+    # Справочники портала (используются GUI настроек)
+    # ------------------------------------------------------------------
+
+    @retry_on_api_error()
+    def get_user_fields(self, entity: str) -> List[Dict[str, str]]:
+        """
+        Возвращает пользовательские поля (UF_CRM_*) сущности CRM.
+
+        Args:
+            entity: 'deal', 'contact' или 'lead'
+
+        Returns:
+            Список словарей {'code', 'title', 'type'}, отсортированный по названию
+        """
+        if entity not in ('deal', 'contact', 'lead', 'company'):
+            raise ValueError(f"Неподдерживаемая сущность: {entity}")
+
+        data = self._make_request(f'crm.{entity}.fields')
+        result = data.get('result') or {}
+
+        fields = []
+        for code, meta in result.items():
+            if not code.startswith('UF_CRM'):
+                continue
+            if not isinstance(meta, dict):
+                continue
+
+            title = (
+                meta.get('formLabel')
+                or meta.get('listLabel')
+                or meta.get('filterLabel')
+                or meta.get('title')
+                or code
+            )
+            fields.append({
+                'code': code,
+                'title': str(title),
+                'type': str(meta.get('type', ''))
+            })
+
+        fields.sort(key=lambda f: f['title'].lower())
+        logger.info(f"Загружено пользовательских полей {entity}: {len(fields)}")
+        return fields
+
+    @retry_on_api_error()
+    def get_deal_categories(self) -> List[Dict[str, str]]:
+        """
+        Возвращает список воронок сделок.
+
+        Общая воронка (ID = 0) не возвращается методом crm.dealcategory.list,
+        поэтому добавляется вручную.
+        """
+        categories = [{'id': '0', 'name': 'Общая'}]
+
+        data = self._make_request('crm.dealcategory.list', {
+            'order': {'SORT': 'ASC'},
+            'select': ['ID', 'NAME']
+        })
+
+        for item in data.get('result') or []:
+            categories.append({
+                'id': str(item.get('ID')),
+                'name': str(item.get('NAME') or f"Воронка {item.get('ID')}")
+            })
+
+        return categories
+
+    @retry_on_api_error()
+    def get_deal_stages(self, category_id: int = 0) -> List[Dict[str, str]]:
+        """
+        Возвращает стадии сделок указанной воронки.
+
+        Args:
+            category_id: ID воронки (0 — общая)
+
+        Returns:
+            Список словарей {'id': STATUS_ID, 'name': NAME}
+        """
+        try:
+            category_id = int(category_id)
+        except (TypeError, ValueError):
+            category_id = 0
+
+        entity_id = 'DEAL_STAGE' if category_id == 0 else f'DEAL_STAGE_{category_id}'
+
+        data = self._make_request('crm.status.list', {
+            'order': {'SORT': 'ASC'},
+            'filter': {'ENTITY_ID': entity_id}
+        })
+
+        stages = [
+            {'id': str(item.get('STATUS_ID')), 'name': str(item.get('NAME') or item.get('STATUS_ID'))}
+            for item in data.get('result') or []
+        ]
+
+        logger.info(f"Загружено стадий воронки {category_id}: {len(stages)}")
+        return stages
+
+    @retry_on_api_error()
+    def get_lead_statuses(self) -> List[Dict[str, str]]:
+        """Возвращает статусы лидов портала"""
+        data = self._make_request('crm.status.list', {
+            'order': {'SORT': 'ASC'},
+            'filter': {'ENTITY_ID': 'STATUS'}
+        })
+
+        return [
+            {'id': str(item.get('STATUS_ID')), 'name': str(item.get('NAME') or item.get('STATUS_ID'))}
+            for item in data.get('result') or []
+        ]
 
     def test_connection(self) -> bool:
         """

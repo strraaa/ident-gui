@@ -31,6 +31,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Флаг DPAPI: привязка ключа к машине, а не к пользователю.
+# Служба синхронизации работает под SYSTEM, а GUI настройки — под живым администратором.
+# Без этого флага значение, зашифрованное в одной учётной записи, не расшифровывается в другой.
+CRYPTPROTECT_LOCAL_MACHINE = 0x04
+
 
 class ConfigValidationError(Exception):
     """Ошибка валидации конфигурации"""
@@ -65,7 +70,13 @@ class ConfigManager:
         ('Sync', 'filial_id', 'ID филиала')
     ]
 
-    def __init__(self, config_path: str = "config.ini", require_config: bool = False):
+    def __init__(
+        self,
+        config_path: str = "config.ini",
+        require_config: bool = False,
+        validate_on_load: bool = True,
+        use_example_defaults: bool = True
+    ):
         """
         Инициализация менеджера конфигурации
 
@@ -73,6 +84,12 @@ class ConfigManager:
             config_path: Путь к файлу конфигурации
             require_config: Если True — требуем наличия `config.ini` в указанном пути,
                             даже если есть `config.example.ini` (useful for production)
+            validate_on_load: Если False — ошибки валидации не выбрасываются при загрузке.
+                              Нужно GUI настроек: невалидный конфиг требуется открыть и починить,
+                              а не упасть на нём.
+            use_example_defaults: Если False — `config.example.ini` не подмешивается как источник
+                              значений по умолчанию. Нужно GUI: иначе сохранение записало бы
+                              в боевой config.ini плейсхолдеры из примера.
 
         Raises:
             FileNotFoundError: Если файл конфигурации не найден
@@ -93,10 +110,11 @@ class ConfigManager:
         files_to_read = []
 
         # Если example рядом с config_path существует - используем его как источник defaults
-        if example_path.exists():
-            files_to_read.append(str(example_path))
-        elif cwd_example.exists():
-            files_to_read.append(str(cwd_example))
+        if use_example_defaults:
+            if example_path.exists():
+                files_to_read.append(str(example_path))
+            elif cwd_example.exists():
+                files_to_read.append(str(cwd_example))
 
         # Если пользовательский config.ini существует - он должен переопределять example
         if self.config_path.exists():
@@ -128,7 +146,7 @@ class ConfigManager:
             raise ConfigValidationError(f"Ошибка чтения файла конфигурации: {e}") from e
 
         # ✅ КРИТИЧНО: Блокирующая валидация ПЕРЕД запуском
-        validation_errors = self.validate()
+        validation_errors = self.validate() if validate_on_load else []
         if validation_errors:
             error_msg = "❌ КОНФИГУРАЦИЯ НЕВАЛИДНА!\n\n" + "\n".join(
                 f"  • {error}" for error in validation_errors
@@ -325,14 +343,14 @@ class ConfigManager:
             )
 
         try:
-            # Шифруем через DPAPI (ключ привязан к текущему пользователю Windows)
+            # Шифруем через DPAPI (ключ привязан к машине — см. CRYPTPROTECT_LOCAL_MACHINE)
             encrypted_bytes = win32crypt.CryptProtectData(
                 plaintext.encode('utf-8'),
                 None,  # Description
                 None,  # Optional entropy
                 None,  # Reserved
                 None,  # Prompt struct
-                0      # Flags
+                CRYPTPROTECT_LOCAL_MACHINE  # Flags
             )
 
             # Возвращаем как hex-строку с префиксом
@@ -431,11 +449,95 @@ class ConfigManager:
 
         return encrypted_count
 
-    def _save_config(self):
-        """Сохраняет конфигурацию в файл"""
+    def _acquire_file_lock(self, timeout_seconds: int = 10, stale_seconds: int = 120) -> bool:
+        """
+        Межпроцессная блокировка config.ini через lock-файл.
+        Нужна, потому что файл правят два процесса: служба синхронизации и GUI настроек.
+        """
+        import time
+
+        lock_path = Path(str(self.config_path) + '.lock')
+        start = time.time()
+
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    f.write(f"{os.getpid()}|{int(time.time())}")
+                self._config_lock_path = lock_path
+                return True
+            except FileExistsError:
+                try:
+                    if time.time() - lock_path.stat().st_mtime > stale_seconds:
+                        lock_path.unlink(missing_ok=True)
+                        continue
+                except Exception:
+                    pass
+
+                if time.time() - start > timeout_seconds:
+                    return False
+                time.sleep(0.1)
+
+    def _release_file_lock(self):
+        """Снимает блокировку config.ini"""
+        lock_path = getattr(self, '_config_lock_path', None)
+        if not lock_path:
+            return
         try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                self.config.write(f)
+            lock_path.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"Не удалось снять блокировку {lock_path}: {e}")
+        finally:
+            self._config_lock_path = None
+
+    def save(self):
+        """Публичное сохранение конфигурации (используется GUI настроек)"""
+        self._save_config()
+
+    def set_value(self, section: str, option: str, value: Any):
+        """
+        Записывает значение в конфигурацию без сохранения на диск.
+        Сохранение выполняется отдельным вызовом save().
+        """
+        if not self.config.has_section(section):
+            self.config.add_section(section)
+        self.config.set(section, option, '' if value is None else str(value))
+
+    def set_secret(self, section: str, option: str, plaintext: str):
+        """
+        Записывает чувствительное значение сразу в зашифрованном виде.
+
+        GUI никогда не показывает и не расшифровывает существующие секреты —
+        он только перезаписывает их новым значением по явному указанию оператора.
+        """
+        if not plaintext:
+            self.set_value(section, option, '')
+            return
+
+        self.set_value(section, option, self._encrypt_value(plaintext))
+
+    def is_encrypted(self, section: str, option: str) -> bool:
+        """Проверяет, хранится ли значение в зашифрованном виде"""
+        value = self.config.get(section, option, fallback='')
+        return bool(value) and value.startswith('DPAPI:')
+
+    def _save_config(self):
+        """Сохраняет конфигурацию в файл (атомарно, под межпроцессной блокировкой)"""
+        try:
+            if not self._acquire_file_lock():
+                raise RuntimeError(
+                    f"Не удалось получить блокировку {self.config_path}: "
+                    f"файл занят другим процессом"
+                )
+
+            try:
+                # Пишем во временный файл и подменяем — чтобы при сбое не остаться с обрезанным конфигом
+                temp_path = Path(str(self.config_path) + '.tmp')
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    self.config.write(f)
+                temp_path.replace(self.config_path)
+            finally:
+                self._release_file_lock()
             # Best-effort ограничение прав доступа
             try:
                 if sys.platform == 'win32':
@@ -522,10 +624,16 @@ class ConfigManager:
             # Комментарий к отмене. Читаем новый ключ, а при его отсутствии — старый
             # `cancel_reason`: в конфигах до 2026-08-28 под этим именем хранился именно
             # комментарий, и переименование ключа не должно ломать работающие установки.
-            'deal_cancel_reason_comment': self.config.get(
-                'deal_fields', 'cancel_reason_comment',
-                fallback=self.config.get('deal_fields', 'cancel_reason', fallback='')
+            # `or`, а не fallback=: config.example.ini подмешивается как источник значений
+            # по умолчанию, поэтому ключ `cancel_reason_comment` существует всегда (пусть и пустой)
+            # и fallback= никогда бы не сработал — старый `cancel_reason` из боевого config.ini
+            # молча игнорировался бы.
+            'deal_cancel_reason_comment': (
+                self.config.get('deal_fields', 'cancel_reason_comment', fallback='')
+                or self.config.get('deal_fields', 'cancel_reason', fallback='')
             ),
+            # Перенос записи из Ident (ID_ReceptionsTransferFrom). Пустое значение = не выгружаем.
+            'deal_transfer_from': self.config.get('deal_fields', 'transfer_from', fallback=''),
             'treatment_plan': self.config.get('deal_fields', 'treatment_plan'),
             'treatment_plan_hash': self.config.get('deal_fields', 'treatment_plan_hash'),
             'filial': self.config.get('deal_fields', 'filial'),

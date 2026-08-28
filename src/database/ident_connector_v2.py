@@ -549,6 +549,12 @@ class IdentConnector:
             rcr.Reason AS CancelReasonName,
             r.CancelReasonComment AS CancelReasonComment,
 
+            -- Перенос записи: Ident хранит явную ссылку на исходную запись
+            -- (FK_ReceptionTransferFrom_Receptions). Филиал источника считаем отдельно —
+            -- подставлять текущий filial_id нельзя, перенос может быть межфилиальным.
+            transfer.SrcReceptionId AS TransferFromReceptionId,
+            transfer.SrcFilialId AS TransferFromFilialId,
+
             -- Регистратор записи (кто завёл запись на приём = ответственный за запись)
             r.ID_StaffsReceptionAdded AS RegistrarStaffId,
 
@@ -574,6 +580,22 @@ class IdentConnector:
 
             -- Причина отмены приёма (справочник Ident)
             LEFT JOIN ReceptionCancelReasons rcr ON r.ID_ReceptionCancelReasons = rcr.ID
+
+            -- Запись-источник при переносе. ID_ReceptionsTransferFrom бывает 0, а не NULL —
+            -- тогда совпадений нет и все три поля вернутся NULL, что и требуется.
+            OUTER APPLY (
+                SELECT TOP 1
+                    src.ID AS SrcReceptionId,
+                    COALESCE(oc_src_order.ID, oc_src_armchair.ID, 0) AS SrcFilialId
+                FROM Receptions src
+                    LEFT JOIN Orders src_o ON src_o.ID_Receptions = src.ID
+                    LEFT JOIN OwnCompanies oc_src_order ON src_o.ID_OwnCompanies = oc_src_order.ID
+                    LEFT JOIN Armchairs src_a ON src.ID_Armchairs = src_a.ID
+                    LEFT JOIN OwnCompanies oc_src_armchair ON src_a.ID_OwnCompanies = oc_src_armchair.ID
+                WHERE src.ID = r.ID_ReceptionsTransferFrom
+                -- Приоритет филиала заказа над филиалом кресла — как в основной выборке
+                ORDER BY CASE WHEN oc_src_order.ID IS NOT NULL THEN 0 ELSE 1 END
+            ) transfer
 
             -- Заказы
             LEFT JOIN Orders o ON r.ID = o.ID_Receptions
@@ -773,6 +795,12 @@ class IdentConnector:
             rcr.Reason AS CancelReasonName,
             r.CancelReasonComment AS CancelReasonComment,
 
+            -- Перенос записи: Ident хранит явную ссылку на исходную запись
+            -- (FK_ReceptionTransferFrom_Receptions). Филиал источника считаем отдельно —
+            -- подставлять текущий filial_id нельзя, перенос может быть межфилиальным.
+            transfer.SrcReceptionId AS TransferFromReceptionId,
+            transfer.SrcFilialId AS TransferFromFilialId,
+
             -- Регистратор записи (кто завёл запись на приём = ответственный за запись)
             r.ID_StaffsReceptionAdded AS RegistrarStaffId,
 
@@ -793,6 +821,20 @@ class IdentConnector:
             LEFT JOIN ReceptionCancelReasons rcr ON r.ID_ReceptionCancelReasons = rcr.ID
             LEFT JOIN Orders o ON r.ID = o.ID_Receptions
             LEFT JOIN OwnCompanies oc_order ON o.ID_OwnCompanies = oc_order.ID
+
+            -- Запись-источник при переносе (см. пояснение в get_receptions)
+            OUTER APPLY (
+                SELECT TOP 1
+                    src.ID AS SrcReceptionId,
+                    COALESCE(oc_src_order.ID, oc_src_armchair.ID, 0) AS SrcFilialId
+                FROM Receptions src
+                    LEFT JOIN Orders src_o ON src_o.ID_Receptions = src.ID
+                    LEFT JOIN OwnCompanies oc_src_order ON src_o.ID_OwnCompanies = oc_src_order.ID
+                    LEFT JOIN Armchairs src_a ON src.ID_Armchairs = src_a.ID
+                    LEFT JOIN OwnCompanies oc_src_armchair ON src_a.ID_OwnCompanies = oc_src_armchair.ID
+                WHERE src.ID = r.ID_ReceptionsTransferFrom
+                ORDER BY CASE WHEN oc_src_order.ID IS NOT NULL THEN 0 ELSE 1 END
+            ) transfer
 
             OUTER APPLY (
                 SELECT
