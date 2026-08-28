@@ -919,6 +919,8 @@ class Bitrix24Client:
             deal_card_field = field_map.get('deal_card_number')
             deal_parent_field = field_map.get('deal_parent')
             deal_comment_field = field_map.get('deal_comment')
+            deal_cancel_reason_field = field_map.get('deal_cancel_reason') or None
+            deal_cancel_reason_comment_field = field_map.get('deal_cancel_reason_comment') or None
             ident_field = field_map.get('ident_field')
             filial_field = field_map.get('filial')
             armchair_field = field_map.get('armchair')
@@ -950,6 +952,12 @@ class Bitrix24Client:
                 deal_card_field: deal_data.get(deal_card_field),  # Номер карты пациента
                 deal_parent_field: deal_data.get(deal_parent_field),  # Родитель/Опекун
                 deal_comment_field: deal_data.get(deal_comment_field),  #  Комментарий из IDENT
+
+                # Отмена приёма (поля опциональны: без ID в конфиге не выгружаются)
+                **({deal_cancel_reason_field: deal_data.get(deal_cancel_reason_field)}
+                   if deal_cancel_reason_field else {}),  # Причина отмены
+                **({deal_cancel_reason_comment_field: deal_data.get(deal_cancel_reason_comment_field)}
+                   if deal_cancel_reason_comment_field else {}),  # Комментарий к отмене
 
                 # Дополнительные поля (для внутреннего использования)
                 ident_field: deal_data.get('uf_crm_ident_id'),  # ID из Ident
@@ -1031,6 +1039,8 @@ class Bitrix24Client:
             deal_card_field = field_map.get('deal_card_number')
             deal_parent_field = field_map.get('deal_parent')
             deal_comment_field = field_map.get('deal_comment')
+            deal_cancel_reason_field = field_map.get('deal_cancel_reason') or None
+            deal_cancel_reason_comment_field = field_map.get('deal_cancel_reason_comment') or None
             ident_field = field_map.get('ident_field')
             status_field = field_map.get('status_field')
             treatment_plan_field = field_map.get('treatment_plan')
@@ -1052,6 +1062,12 @@ class Bitrix24Client:
                 deal_card_field: deal_data.get(deal_card_field),  # Номер карты пациента
                 deal_parent_field: deal_data.get(deal_parent_field),  # Родитель/Опекун
                 deal_comment_field: deal_data.get(deal_comment_field),  #  Комментарий из IDENT
+
+                # Отмена приёма (поля опциональны: без ID в конфиге не выгружаются)
+                **({deal_cancel_reason_field: deal_data.get(deal_cancel_reason_field)}
+                   if deal_cancel_reason_field else {}),  # Причина отмены
+                **({deal_cancel_reason_comment_field: deal_data.get(deal_cancel_reason_comment_field)}
+                   if deal_cancel_reason_comment_field else {}),  # Комментарий к отмене
 
                 # Дополнительные поля (для внутреннего использования)
                 ident_field: deal_data.get('uf_crm_ident_id'),  # ID из Ident

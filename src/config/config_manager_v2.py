@@ -517,6 +517,15 @@ class ConfigManager:
             'deal_card_number': self.config.get('deal_fields', 'card_number'),
             'deal_parent': self.config.get('deal_fields', 'parent_name'),
             'deal_comment': self.config.get('deal_fields', 'comment'),
+            # Причина отмены — новый ключ, отдельное поле портала
+            'deal_cancel_reason': self.config.get('deal_fields', 'cancel_reason_name', fallback=''),
+            # Комментарий к отмене. Читаем новый ключ, а при его отсутствии — старый
+            # `cancel_reason`: в конфигах до 2026-08-28 под этим именем хранился именно
+            # комментарий, и переименование ключа не должно ломать работающие установки.
+            'deal_cancel_reason_comment': self.config.get(
+                'deal_fields', 'cancel_reason_comment',
+                fallback=self.config.get('deal_fields', 'cancel_reason', fallback='')
+            ),
             'treatment_plan': self.config.get('deal_fields', 'treatment_plan'),
             'treatment_plan_hash': self.config.get('deal_fields', 'treatment_plan_hash'),
             'filial': self.config.get('deal_fields', 'filial'),

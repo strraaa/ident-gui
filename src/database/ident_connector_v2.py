@@ -545,6 +545,10 @@ class IdentConnector:
             -- Комментарий
             r.Comment AS Comment,
 
+            -- Отмена приёма: причина из справочника + комментарий регистратора
+            rcr.Reason AS CancelReasonName,
+            r.CancelReasonComment AS CancelReasonComment,
+
             -- Регистратор записи (кто завёл запись на приём = ответственный за запись)
             r.ID_StaffsReceptionAdded AS RegistrarStaffId,
 
@@ -567,6 +571,9 @@ class IdentConnector:
             -- Филиал через кабинет
             LEFT JOIN Armchairs a ON r.ID_Armchairs = a.ID
             LEFT JOIN OwnCompanies oc_armchair ON a.ID_OwnCompanies = oc_armchair.ID
+
+            -- Причина отмены приёма (справочник Ident)
+            LEFT JOIN ReceptionCancelReasons rcr ON r.ID_ReceptionCancelReasons = rcr.ID
 
             -- Заказы
             LEFT JOIN Orders o ON r.ID = o.ID_Receptions
@@ -762,6 +769,10 @@ class IdentConnector:
             -- Комментарий
             r.Comment AS Comment,
 
+            -- Отмена приёма: причина из справочника + комментарий регистратора
+            rcr.Reason AS CancelReasonName,
+            r.CancelReasonComment AS CancelReasonComment,
+
             -- Регистратор записи (кто завёл запись на приём = ответственный за запись)
             r.ID_StaffsReceptionAdded AS RegistrarStaffId,
 
@@ -779,6 +790,7 @@ class IdentConnector:
             LEFT JOIN ProfessionNames pn ON i.ID_ProfessionNames = pn.ID
             LEFT JOIN Armchairs a ON r.ID_Armchairs = a.ID
             LEFT JOIN OwnCompanies oc_armchair ON a.ID_OwnCompanies = oc_armchair.ID
+            LEFT JOIN ReceptionCancelReasons rcr ON r.ID_ReceptionCancelReasons = rcr.ID
             LEFT JOIN Orders o ON r.ID = o.ID_Receptions
             LEFT JOIN OwnCompanies oc_order ON o.ID_OwnCompanies = oc_order.ID
 

@@ -515,6 +515,8 @@ class DataTransformer:
         deal_card_field = field_map.get('deal_card_number')
         deal_parent_field = field_map.get('deal_parent')
         deal_comment_field = field_map.get('deal_comment')
+        deal_cancel_reason_field = field_map.get('deal_cancel_reason') or None
+        deal_cancel_reason_comment_field = field_map.get('deal_cancel_reason_comment') or None
 
         transformed = {
             # Идентификаторы
@@ -549,6 +551,12 @@ class DataTransformer:
                 deal_card_field: reception.get('CardNumber', ''),  # Номер карты пациента
                 deal_parent_field: reception.get('ParentFullName', ''),  # Родитель/Опекун
                 deal_comment_field: reception.get('Comment', ''),  # Комментарий из IDENT
+
+                # Отмена приёма (поля опциональны: без ID в конфиге не выгружаются)
+                **({deal_cancel_reason_field: reception.get('CancelReasonName') or ''}
+                   if deal_cancel_reason_field else {}),  # Причина отмены (справочник Ident)
+                **({deal_cancel_reason_comment_field: reception.get('CancelReasonComment') or ''}
+                   if deal_cancel_reason_comment_field else {}),  # Комментарий к отмене
 
                 # Дополнительная информация (в комментарии)
                 'uf_crm_ident_id': unique_id,               # ID из Ident (для поиска)
@@ -662,6 +670,8 @@ if __name__ == "__main__":
         'TotalAmount': 5500.00,
         'Status': 'Запланирован',
         'Comment': 'Первичный прием',
+        'CancelReasonName': '',
+        'CancelReasonComment': '',
         'RegistrarStaffId': 42,
         'OrderDate': datetime(2024, 1, 10, 10, 0)
     }
