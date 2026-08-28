@@ -140,7 +140,11 @@ class ConfigManager:
 
         # Загружаем конфигурацию (сначала example как defaults, затем config.ini для переопределения)
         try:
-            read_files = self.config.read(files_to_read, encoding='utf-8')
+            # utf-8-sig, а не utf-8: Блокнот и Out-File в Windows PowerShell 5.1 сохраняют
+            # config.ini с BOM, и configparser читает его как часть первой строки —
+            # «File contains no section headers». utf-8-sig снимает BOM, если он есть,
+            # и работает с файлами без него.
+            read_files = self.config.read(files_to_read, encoding='utf-8-sig')
             logger.info(f"Загружены конфигурационные файлы: {read_files}")
         except Exception as e:
             raise ConfigValidationError(f"Ошибка чтения файла конфигурации: {e}") from e
