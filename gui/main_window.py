@@ -221,8 +221,7 @@ class MainWindow(QMainWindow):
                 if tab.is_settings_tab:
                     tab.apply_to_config()
 
-            backup_path = self.config.backup()
-            self.config.save()
+            backup_path = self.config.save()
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка сохранения', f'Не удалось сохранить настройки:\n{e}')
             return

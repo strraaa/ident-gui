@@ -83,10 +83,9 @@ class DatabaseService:
         """
         from src.database.ident_connector_v2 import IdentConnector
 
-        if not self.config.manager:
+        db_config = self.config.database_config()
+        if not db_config:
             raise RuntimeError('Конфигурация не загружена')
-
-        db_config = self.config.manager.get_database_config()
 
         connector = IdentConnector(
             server=db_config['server'],
