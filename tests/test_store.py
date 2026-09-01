@@ -99,6 +99,28 @@ class ChangeTrackingTests(unittest.TestCase):
         self.assertFalse(store.is_dirty)
         self.assertEqual(store.changes(), [])
 
+    def test_writing_the_default_of_a_missing_key_is_not_a_change(self):
+        """
+        Ключа нет в файле — значит действует умолчание реестра.
+        Запись того же умолчания обратно ничего не меняет и не должна
+        помечать страницу несохранённой.
+        """
+        store = store_from()
+
+        self.assertEqual(store.value('bitrix', 'request_timeout'), 30)
+        store.set_value('bitrix', 'request_timeout', 30)
+
+        self.assertFalse(store.is_dirty)
+
+    def test_missing_key_with_another_value_is_a_change(self):
+        store = store_from()
+        store.set_value('bitrix', 'request_timeout', 45)
+
+        change = store.changes()[0]
+
+        self.assertEqual(change.before, '30')
+        self.assertEqual(change.after, '45')
+
     def test_reset_discards_edits(self):
         store = store_from()
         store.set_value('Sync', 'interval_minutes', 9)

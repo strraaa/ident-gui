@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
 from gui.services.b24_service import B24Service
 from gui.services.config_service import ConfigService
 from gui.services.workers import WorkerRunner
-from gui.tabs.base import BaseTab
+from gui.pages.page import Page, Section
+from gui.theme import set_strong, set_tone
 
 MAPPING_COLUMNS = ['Статус приёма в Ident', 'Стадия сделки в Битрикс24']
 
@@ -38,11 +39,14 @@ KNOWN_IDENT_STATUSES = [
 ]
 
 
-class StagesTab(BaseTab):
+class StagesPage(Page):
     """Маппинг статусов и правила защиты стадий"""
 
-    title = 'Стадии'
-    is_settings_tab = True
+    key = 'stages'
+    title = 'Стадии и воронка'
+    hint = 'Статусы приёма, стадии сделки и защита от автоизменений'
+    section = Section.SETTINGS
+    is_settings = True
 
     def __init__(self, config: ConfigService, parent=None):
         super().__init__(config, parent)
@@ -69,7 +73,7 @@ class StagesTab(BaseTab):
         self.btn_load.clicked.connect(self._on_load)
 
         self.lbl_load_state = QLabel('Стадии портала не загружены — доступен ручной ввод')
-        self.lbl_load_state.setObjectName('hint')
+        set_tone(self.lbl_load_state, 'muted')
         self.lbl_load_state.setWordWrap(True)
 
         top.addWidget(QLabel('Воронка сделок:'))
@@ -134,7 +138,7 @@ class StagesTab(BaseTab):
 
         hint = QLabel('Сделка считается закрытой: служба её не обновляет и стадию не меняет.')
         hint.setWordWrap(True)
-        hint.setObjectName('hint')
+        set_tone(hint, 'muted')
         layout.addWidget(hint)
 
         return box
@@ -148,7 +152,7 @@ class StagesTab(BaseTab):
 
         hint = QLabel('Поля сделки обновляются, но стадию служба не переключает.')
         hint.setWordWrap(True)
-        hint.setObjectName('hint')
+        set_tone(hint, 'muted')
         layout.addWidget(hint)
 
         return box
@@ -162,7 +166,7 @@ class StagesTab(BaseTab):
 
         hint = QLabel('Лиды в этих статусах не конвертируются в сделки.')
         hint.setWordWrap(True)
-        hint.setObjectName('hint')
+        set_tone(hint, 'muted')
         layout.addWidget(hint)
 
         return box
@@ -296,7 +300,7 @@ class StagesTab(BaseTab):
 
         self.btn_load.setEnabled(False)
         self.lbl_load_state.setText('Загружаем стадии портала…')
-        self.lbl_load_state.setStyleSheet('')
+        set_tone(self.lbl_load_state, 'muted')
 
         self.runner.run(
             self.b24_service.load_stage_environment,
@@ -341,12 +345,12 @@ class StagesTab(BaseTab):
         self.lbl_load_state.setText(
             f'Загружено стадий: {len(self._stages)}, статусов лидов: {len(self._lead_statuses)}'
         )
-        self.lbl_load_state.setStyleSheet('color: #1a7f37;')
+        set_tone(self.lbl_load_state, 'success')
 
     def _on_load_failed(self, error: str):
         self.btn_load.setEnabled(True)
         self.lbl_load_state.setText(f'Не удалось загрузить стадии: {error}')
-        self.lbl_load_state.setStyleSheet('color: #b42318;')
+        set_tone(self.lbl_load_state, 'danger')
 
         QMessageBox.warning(
             self,

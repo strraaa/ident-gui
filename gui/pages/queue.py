@@ -22,7 +22,8 @@ from gui.services.queue_service import (
     STATUS_COMPLETED, STATUS_FAILED, STATUS_PENDING, STATUS_PROCESSING,
     QueueLockError, QueueRow, QueueService
 )
-from gui.tabs.base import BaseTab
+from gui.pages.page import Page, Section
+from gui.theme import set_tone
 
 COLUMNS = ['IDENT ID', 'Пациент', 'Статус', 'Попыток', 'Обновлён', 'Следующая попытка', 'Ошибка']
 
@@ -37,10 +38,13 @@ FILTERS = [
 ]
 
 
-class QueueTab(BaseTab):
+class QueuePage(Page):
     """Просмотр и управление очередью повторных попыток"""
 
+    key = 'queue'
     title = 'Очередь'
+    hint = 'Что не доехало до Битрикса и почему'
+    section = Section.MONITOR
 
     def __init__(self, config: ConfigService, parent=None):
         super().__init__(config, parent)
@@ -133,7 +137,7 @@ class QueueTab(BaseTab):
             'массовыми операциями её лучше остановить на вкладке «Состояние».'
         )
         hint.setWordWrap(True)
-        hint.setObjectName('hint')
+        set_tone(hint, 'muted')
         layout.addWidget(hint)
 
     # ------------------------------------------------------------------

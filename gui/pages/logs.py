@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.services.config_service import ConfigService
-from gui.tabs.base import BaseTab
+from gui.pages.page import Page, Section
 
 # Сколько байт с конца файла читать
 TAIL_BYTES = 512 * 1024
@@ -27,10 +27,13 @@ TAIL_BYTES = 512 * 1024
 ERROR_MARKERS = ('ERROR', 'CRITICAL', 'Traceback', 'ОШИБКА')
 
 
-class LogsTab(BaseTab):
+class LogsPage(Page):
     """Просмотр журналов службы"""
 
-    title = 'Логи'
+    key = 'logs'
+    title = 'Журнал'
+    hint = 'Хвост журнала службы'
+    section = Section.MONITOR
 
     def __init__(self, config: ConfigService, parent=None):
         super().__init__(config, parent)
