@@ -1,7 +1,22 @@
 # Build IDENT -> Bitrix24 Settings GUI (One Directory Mode)
 # Creates dist\ident_settings\ident_settings.exe
+#
+# -NoPause: не ждать Enter в конце (нужно для CI, раннер не интерактивный)
+
+param(
+    [switch]$NoPause
+)
 
 $ErrorActionPreference = "Stop"
+
+# GitHub Actions и прочие CI выставляют $env:CI — пауза там повесит job
+if ($env:CI) { $NoPause = $true }
+
+function Exit-Build {
+    param([int]$Code = 0)
+    if (-not $NoPause) { Read-Host "Press Enter to exit" }
+    exit $Code
+}
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
@@ -19,15 +34,13 @@ try {
 } catch {
     Write-Host "ERROR: Python not found" -ForegroundColor Red
     Write-Host ""
-    Read-Host "Press Enter to exit"
-    exit 1
+    Exit-Build 1
 }
 
 if (-not (Test-Path "gui_main.py")) {
     Write-Host "ERROR: gui_main.py not found" -ForegroundColor Red
     Write-Host ""
-    Read-Host "Press Enter to exit"
-    exit 1
+    Exit-Build 1
 }
 
 # Install dependencies
@@ -82,8 +95,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "ERROR: Build failed" -ForegroundColor Red
     Write-Host ""
-    Read-Host "Press Enter to exit"
-    exit 1
+    Exit-Build 1
 }
 
 Write-Host ""
@@ -97,4 +109,4 @@ Write-Host "Usage:" -ForegroundColor Cyan
 Write-Host "  Run as Administrator - otherwise service restart is unavailable" -ForegroundColor Yellow
 Write-Host "  Custom folder: ident_settings.exe --workdir ""C:\Program Files\IdentBitrix24""" -ForegroundColor White
 Write-Host ""
-Read-Host "Press Enter to exit"
+Exit-Build 0
