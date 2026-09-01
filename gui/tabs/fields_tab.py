@@ -47,6 +47,8 @@ FIELD_SPECS: List[FieldSpec] = [
               'Из справочника Ident: «Отказ от приема», «Не пришел» и т. д.'),
     FieldSpec('deal', 'deal_fields', 'cancel_reason_comment', 'Комментарий к отмене', False,
               'Свободный текст регистратора при отмене приёма'),
+    FieldSpec('deal', 'deal_fields', 'transfer_from', 'Перенесена из записи', False,
+              'Идентификатор исходной записи вида F1_12345, если приём перенесён с другого времени'),
     FieldSpec('deal', 'deal_fields', 'filial', 'Филиал', False, ''),
     FieldSpec('deal', 'deal_fields', 'armchair', 'Кресло', False, ''),
     FieldSpec('deal', 'deal_fields', 'order_date', 'Дата заказа', False, ''),

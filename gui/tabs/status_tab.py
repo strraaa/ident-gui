@@ -15,9 +15,12 @@ from PySide6.QtWidgets import (
 from gui.services.config_service import ConfigService
 from gui.services.queue_service import QueueService
 from gui.services.task_service import TaskService
+from gui.services.workers import WorkerRunner
 from gui.tabs.base import BaseTab
 
-REFRESH_INTERVAL_MS = 5000
+# Опрос планировщика стоит запуска powershell.exe (сотни миллисекунд даже
+# с -NoProfile), поэтому идёт в фоне и не чаще раза в 10 секунд.
+REFRESH_INTERVAL_MS = 10000
 
 
 class StatusTab(BaseTab):
@@ -28,6 +31,8 @@ class StatusTab(BaseTab):
     def __init__(self, config: ConfigService, task_service: TaskService, parent=None):
         super().__init__(config, parent)
         self.task_service = task_service
+        self.runner = WorkerRunner()
+        self._busy = False          # опрос уже идёт — тик пропускаем
 
         self._build_ui()
 
@@ -142,14 +147,50 @@ class StatusTab(BaseTab):
         if not self.isVisible():
             return
 
-        self._refresh_service()
+        # Дёшево (память + маленький json) — можно прямо в UI-потоке
         self._refresh_sync()
-        self._refresh_queue()
         self._refresh_config()
 
-    def _refresh_service(self):
+        # Дорого (powershell + разбор очереди) — в фоне
+        self._request_snapshot()
+
+    # ------------------------------------------------------------------
+    # Фоновый сбор состояния
+    # ------------------------------------------------------------------
+
+    def _request_snapshot(self):
+        if self._busy:
+            # Предыдущий опрос ещё не вернулся: очередь тиков копить нельзя,
+            # иначе на медленной машине потоки пойдут лавиной.
+            return
+
+        self._busy = True
+        self.runner.run(self._collect_snapshot, self._on_snapshot, self._on_snapshot_failed)
+
+    def _collect_snapshot(self):
+        """Выполняется в фоновом потоке: запуск powershell и чтение очереди"""
         status = self.task_service.status()
 
+        queue = QueueService(self.config.queue_file_path())
+        max_attempts = self.config.get_int('Queue', 'max_retry_attempts', 3)
+        stats = queue.statistics(queue.read_rows(), max_attempts)
+
+        return status, stats
+
+    def _on_snapshot(self, result):
+        self._busy = False
+        status, stats = result
+        self._apply_service(status)
+        self._apply_queue(stats)
+
+    def _on_snapshot_failed(self, error: str):
+        self._busy = False
+        self.lbl_state.setText(f'Не удалось получить состояние: {error}')
+        self._set_service_buttons(False)
+
+    # ------------------------------------------------------------------
+
+    def _apply_service(self, status):
         if not status.available:
             self.lbl_state.setText(status.error or 'Недоступно')
             self._set_service_buttons(False)
@@ -227,13 +268,7 @@ class StatusTab(BaseTab):
         )
         self.lbl_interval.setText(f"{self.config.get('Sync', 'interval_minutes', '—')} мин")
 
-    def _refresh_queue(self):
-        queue = QueueService(self.config.queue_file_path())
-        max_attempts = self.config.get_int('Queue', 'max_retry_attempts', 3)
-
-        rows = queue.read_rows()
-        stats = queue.statistics(rows, max_attempts)
-
+    def _apply_queue(self, stats):
         waiting = stats['pending'] + stats['processing'] + stats['failed'] - stats['exhausted']
 
         self.lbl_queue_total.setText(str(stats['total']))
@@ -283,13 +318,24 @@ class StatusTab(BaseTab):
         self._run_task_action(self.task_service.restart)
 
     def _run_task_action(self, action):
-        ok, message = action()
+        # Пуск/останов/перезапуск — это два-три вызова powershell подряд.
+        # В UI-потоке окно замирало бы на несколько секунд.
+        self._set_service_buttons(False)
+        self.lbl_state.setText('Выполняется…')
+        self.runner.run(action, self._on_task_action_done, self._on_task_action_failed)
+
+    def _on_task_action_done(self, result):
+        ok, message = result
 
         if ok:
             QMessageBox.information(self, 'Служба', message)
         else:
             QMessageBox.warning(self, 'Служба', message)
 
+        self.refresh()
+
+    def _on_task_action_failed(self, error: str):
+        QMessageBox.warning(self, 'Служба', f'Не удалось выполнить операцию: {error}')
         self.refresh()
 
     # ------------------------------------------------------------------
