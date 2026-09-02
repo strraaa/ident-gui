@@ -10,16 +10,20 @@ from PySide6.QtWidgets import (
 )
 
 from gui.services.config_service import ConfigService
-from gui.tabs.base import BaseTab
+from gui.pages.page import Page, Section
+from gui.theme import set_tone
 
 LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
 
 
-class SyncTab(BaseTab):
+class SyncPage(Page):
     """Параметры синхронизации, очереди и логов"""
 
+    key = 'sync'
     title = 'Синхронизация'
-    is_settings_tab = True
+    hint = 'Цикл, филиалы, очередь и журналирование'
+    section = Section.SETTINGS
+    is_settings = True
 
     def __init__(self, config: ConfigService, parent=None):
         super().__init__(config, parent)
@@ -48,7 +52,7 @@ class SyncTab(BaseTab):
         """
         label = QLabel(text)
         label.setWordWrap(True)
-        label.setObjectName('hint')
+        set_tone(label, 'muted')
         return label
 
     def _build_sync_box(self) -> QGroupBox:

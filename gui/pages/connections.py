@@ -16,16 +16,20 @@ from PySide6.QtWidgets import (
 from gui.services.b24_service import B24Service, DatabaseService
 from gui.services.config_service import ConfigService
 from gui.services.workers import WorkerRunner
-from gui.tabs.base import BaseTab
+from gui.pages.page import Page, Section
+from gui.theme import set_strong, set_tone
 
 PLACEHOLDER_KEEP = '••••••••  (сохранён, не показывается)'
 
 
-class ConnectionsTab(BaseTab):
+class ConnectionsPage(Page):
     """Настройки подключения к БД и порталу"""
 
+    key = 'connections'
     title = 'Подключения'
-    is_settings_tab = True
+    hint = 'Доступ к базе Ident и к порталу Битрикс24'
+    section = Section.SETTINGS
+    is_settings = True
 
     def __init__(self, config: ConfigService, parent=None):
         super().__init__(config, parent)
@@ -63,7 +67,8 @@ class ConnectionsTab(BaseTab):
         self.txt_db_password.setEchoMode(QLineEdit.Password)
 
         self.lbl_db_password_state = QLabel()
-        self.lbl_db_password_state.setObjectName('hint')
+        self.lbl_db_password_state.setWordWrap(True)
+        set_tone(self.lbl_db_password_state, 'muted')
 
         self.spin_db_conn_timeout = QSpinBox()
         self.spin_db_conn_timeout.setRange(1, 600)
@@ -78,11 +83,14 @@ class ConnectionsTab(BaseTab):
         form.addRow('База данных:', self.txt_db_name)
         form.addRow('Пользователь:', self.txt_db_user)
         form.addRow('Пароль:', self.txt_db_password)
-        form.addRow('', self.lbl_db_password_state)
         form.addRow('Таймаут подключения:', self.spin_db_conn_timeout)
         form.addRow('Таймаут запроса:', self.spin_db_query_timeout)
 
         outer.addLayout(form)
+
+        # Переносимую по словам подсказку нельзя класть строкой в QFormLayout:
+        # высота считается по одной строке, и текст налезает на соседние поля
+        outer.addWidget(self.lbl_db_password_state)
 
         buttons = QHBoxLayout()
         self.btn_test_db = QPushButton('Проверить подключение к БД')
@@ -151,7 +159,7 @@ class ConnectionsTab(BaseTab):
             'Права вебхука должны включать CRM.'
         )
         hint.setWordWrap(True)
-        hint.setObjectName('hint')
+        set_tone(hint, 'muted')
         outer.addWidget(hint)
 
         return box
@@ -259,7 +267,7 @@ class ConnectionsTab(BaseTab):
 
         self.btn_test_db.setEnabled(False)
         self.lbl_db_result.setText('Проверяем…')
-        self.lbl_db_result.setStyleSheet('')
+        set_tone(self.lbl_db_result, 'muted')
 
         self.runner.run(
             self.db_service.test_connection,
@@ -273,7 +281,7 @@ class ConnectionsTab(BaseTab):
 
         self.btn_test_b24.setEnabled(False)
         self.lbl_b24_result.setText('Проверяем…')
-        self.lbl_b24_result.setStyleSheet('')
+        set_tone(self.lbl_b24_result, 'muted')
 
         self.runner.run(
             self.b24_service.test_connection,
@@ -285,7 +293,7 @@ class ConnectionsTab(BaseTab):
     def _on_test_done(button: QPushButton, label: QLabel, message: str, success: bool):
         button.setEnabled(True)
         label.setText(message if success else f'Ошибка: {message}')
-        label.setStyleSheet('color: #1a7f37;' if success else 'color: #b42318;')
+        set_tone(label, 'success' if success else 'danger')
 
     def _unsaved_warning(self, action: str) -> bool:
         """Возвращает True, если проверку выполнять нельзя из-за несохранённых правок"""

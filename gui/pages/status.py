@@ -1,5 +1,5 @@
 """
-Вкладка «Состояние»: что сейчас происходит со службой, синхронизацией и очередью.
+Страница «Обзор»: что сейчас происходит со службой, синхронизацией и очередью.
 """
 
 import json
@@ -16,17 +16,25 @@ from gui.services.config_service import ConfigService
 from gui.services.queue_service import QueueService
 from gui.services.task_service import TaskService
 from gui.services.workers import WorkerRunner
-from gui.tabs.base import BaseTab
+from gui.pages.page import Page, Section
+from gui.theme import set_strong, set_tone
+from gui.widgets import Badge
 
 # Опрос планировщика стоит запуска powershell.exe (сотни миллисекунд даже
 # с -NoProfile), поэтому идёт в фоне и не чаще раза в 10 секунд.
 REFRESH_INTERVAL_MS = 10000
 
+# С какого отставания синхронизация считается остановившейся
+STALE_SYNC_MINUTES = 30
 
-class StatusTab(BaseTab):
+
+class StatusPage(Page):
     """Сводка состояния и управление службой"""
 
-    title = 'Состояние'
+    key = 'overview'
+    title = 'Обзор'
+    hint = 'Служба, синхронизация, очередь и проблемы конфигурации'
+    section = Section.MONITOR
 
     def __init__(self, config: ConfigService, task_service: TaskService, parent=None):
         super().__init__(config, parent)
@@ -54,9 +62,10 @@ class StatusTab(BaseTab):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
 
-        self.lbl_state = QLabel('—')
+        # Состояние и результат — отметки: их видно, не читая
+        self.lbl_state = Badge('—')
         self.lbl_last_run = QLabel('—')
-        self.lbl_last_result = QLabel('—')
+        self.lbl_last_result = Badge('—')
         self.lbl_next_run = QLabel('—')
         self.lbl_processes = QLabel('—')
 
@@ -84,7 +93,7 @@ class StatusTab(BaseTab):
 
         self.lbl_admin_hint = QLabel()
         self.lbl_admin_hint.setWordWrap(True)
-        self.lbl_admin_hint.setObjectName('hint')
+        set_tone(self.lbl_admin_hint, 'muted')
         service_layout.addWidget(self.lbl_admin_hint)
 
         layout.addWidget(service_box)
@@ -206,30 +215,30 @@ class StatusTab(BaseTab):
             )
             return
 
-        self.lbl_state.setText(status.state_title)
-        self.lbl_state.setStyleSheet(
-            'color: #1a7f37; font-weight: 600;' if status.is_running else 'color: #a04100; font-weight: 600;'
+        self.lbl_state.set_state(
+            status.state_title,
+            'success' if status.is_running else 'warning'
         )
         self.lbl_last_run.setText(status.last_run_time or '—')
         self.lbl_next_run.setText(status.next_run_time or '—')
         self.lbl_processes.setText(str(len(status.processes)) if status.processes else '0')
 
         if status.last_task_result is None:
-            self.lbl_last_result.setText('—')
+            self.lbl_last_result.set_state('—')
         elif status.last_result_is_error:
-            self.lbl_last_result.setText(f'Код {status.last_task_result} (ошибка)')
-            self.lbl_last_result.setStyleSheet('color: #b42318;')
+            self.lbl_last_result.set_state(f'Код {status.last_task_result} — ошибка', 'danger')
         else:
-            self.lbl_last_result.setText(f'Код {status.last_task_result}')
-            self.lbl_last_result.setStyleSheet('')
+            self.lbl_last_result.set_state(f'Код {status.last_task_result}', 'success')
 
         if len(status.processes) > 1:
             self.lbl_processes.setText(
                 f'{len(status.processes)} — это дубликаты, синхронизация может задваиваться'
             )
-            self.lbl_processes.setStyleSheet('color: #b42318; font-weight: 600;')
+            set_tone(self.lbl_processes, 'danger')
+            set_strong(self.lbl_processes)
         else:
-            self.lbl_processes.setStyleSheet('')
+            set_tone(self.lbl_processes, None)
+            set_strong(self.lbl_processes, False)
 
         is_admin = self.task_service.is_admin()
         self._set_service_buttons(is_admin)
@@ -254,9 +263,11 @@ class StatusTab(BaseTab):
                 delta = datetime.now() - parsed
                 minutes = int(delta.total_seconds() // 60)
                 self.lbl_sync_age.setText(self._humanize_minutes(minutes))
-                self.lbl_sync_age.setStyleSheet(
-                    'color: #b42318; font-weight: 600;' if minutes > 30 else ''
-                )
+                # Отставание больше получаса при штатном цикле в две минуты
+                # означает, что служба стоит или не доходит до портала
+                stale = minutes > STALE_SYNC_MINUTES
+                set_tone(self.lbl_sync_age, 'danger' if stale else None)
+                set_strong(self.lbl_sync_age, stale)
             else:
                 self.lbl_last_sync.setText(str(last_sync or 'нет данных'))
                 self.lbl_sync_age.setText('—')
@@ -274,9 +285,8 @@ class StatusTab(BaseTab):
         self.lbl_queue_total.setText(str(stats['total']))
         self.lbl_queue_waiting.setText(str(max(waiting, 0)))
         self.lbl_queue_exhausted.setText(str(stats['exhausted']))
-        self.lbl_queue_exhausted.setStyleSheet(
-            'color: #b42318; font-weight: 600;' if stats['exhausted'] else ''
-        )
+        set_tone(self.lbl_queue_exhausted, 'danger' if stats['exhausted'] else None)
+        set_strong(self.lbl_queue_exhausted, bool(stats['exhausted']))
 
     def _refresh_config(self):
         self.lbl_config_path.setText(str(self.config.workspace.config_path))
@@ -287,10 +297,10 @@ class StatusTab(BaseTab):
             if len(problems) > 5:
                 text += f'\n… и ещё {len(problems) - 5}'
             self.lbl_config_problems.setText(text)
-            self.lbl_config_problems.setStyleSheet('color: #b42318;')
+            set_tone(self.lbl_config_problems, 'danger')
         else:
             self.lbl_config_problems.setText('Проблем не обнаружено')
-            self.lbl_config_problems.setStyleSheet('color: #1a7f37;')
+            set_tone(self.lbl_config_problems, 'success')
 
     # ------------------------------------------------------------------
 

@@ -1,19 +1,28 @@
 """
 Работа с config.ini из GUI.
 
-Важные особенности по сравнению с загрузкой конфига в службе:
+Здесь сходятся две вещи. Правкой и записью занимается SettingsStore: он держит
+исходное состояние файла, копит изменения и пишет их так, чтобы комментарии,
+порядок ключей и незнакомые секции остались нетронутыми.
+
+ConfigManager остаётся рядом ровно для двух задач, которые кроме него делать
+некому: расшифровать секреты для подключения к базе и порталу и зашифровать
+новый секрет через DPAPI. Значения оттуда не показываются оператору никогда.
+
+Отличия от загрузки конфигурации в службе:
 - валидация не блокирует загрузку (невалидный конфиг нужно открыть и починить);
-- config.example.ini не подмешивается, иначе сохранение записало бы в боевой файл
-  плейсхолдеры вроде `your_password`;
-- секреты никогда не расшифровываются: GUI показывает лишь факт «значение зашифровано»
-  и умеет перезаписать его новым.
+- config.example.ini не подмешивается, иначе сохранение записало бы в боевой
+  файл плейсхолдеры вроде `your_password`.
 """
 
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.config.config_manager_v2 import ConfigManager, DPAPI_AVAILABLE
+
+from gui.core import schema
+from gui.core.store import Change, SettingsStore
 
 from .paths import Workspace
 
@@ -21,18 +30,11 @@ from .paths import Workspace
 class ConfigService:
     """Чтение, правка и сохранение конфигурации службы"""
 
-    # Поля, которые хранятся в зашифрованном виде
-    SECRET_FIELDS: List[Tuple[str, str]] = [
-        ('Database', 'password'),
-        ('bitrix', 'token'),
-        ('Notifications', 'smtp_password'),
-    ]
-
     def __init__(self, workspace: Workspace):
         self.workspace = workspace
+        self.store: Optional[SettingsStore] = None
         self.manager: Optional[ConfigManager] = None
         self.load_error: Optional[str] = None
-        self._dirty = False
 
     # ------------------------------------------------------------------
     # Загрузка и сохранение
@@ -44,129 +46,153 @@ class ConfigService:
         (текст ошибки — в load_error).
         """
         self.load_error = None
-        self._dirty = False
 
         if not self.workspace.config_path.exists():
-            self.load_error = f"Файл не найден: {self.workspace.config_path}"
+            self.load_error = f'Файл не найден: {self.workspace.config_path}'
+            self.store = None
             self.manager = None
             return False
 
         try:
-            self.manager = ConfigManager(
-                str(self.workspace.config_path),
-                require_config=False,
-                validate_on_load=False,
-                use_example_defaults=False
+            self.manager = self._open_manager()
+            self.store = SettingsStore.load(
+                self.workspace.config_path,
+                encryptor=self._encrypt
             )
             return True
         except Exception as e:
+            self.store = None
             self.manager = None
             self.load_error = str(e)
             return False
 
     def create_from_example(self) -> bool:
-        """Создаёт config.ini из config.example.ini (для первичной настройки)"""
+        """
+        Создаёт config.ini из config.example.ini.
+
+        Копируется именно файл, а не разобранная конфигурация: вместе со
+        значениями оператор получает и комментарии, которыми образец объясняет,
+        что означает каждый параметр.
+        """
         example = self.workspace.example_config_path
         if not example.exists():
-            self.load_error = f"Файл-образец не найден: {example}"
+            self.load_error = f'Файл-образец не найден: {example}'
             return False
 
         self.workspace.config_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(example, self.workspace.config_path)
         return self.load()
 
-    def save(self):
-        """Сохраняет изменения на диск"""
+    def save(self) -> Optional[Path]:
+        """
+        Записывает изменения. Возвращает путь резервной копии прежнего файла.
+
+        После записи ConfigManager перечитывается: расшифрованные значения
+        для проверки подключений должны соответствовать тому, что теперь в файле.
+        """
         self._require_loaded()
-        self.manager.save()
-        self._dirty = False
 
-    def backup(self) -> Optional[Path]:
-        """Делает копию конфига перед сохранением. Возвращает путь копии."""
-        source = self.workspace.config_path
-        if not source.exists():
-            return None
+        backup = self.store.save(self.workspace.config_path)
 
-        backup_path = source.with_suffix('.ini.bak')
-        shutil.copyfile(source, backup_path)
-        return backup_path
+        try:
+            self.manager = self._open_manager()
+        except Exception:
+            # Файл уже записан. Если перечитать его не удалось, проверки
+            # подключения перестанут работать, но настройки не потеряны.
+            self.manager = None
+
+        return backup
 
     # ------------------------------------------------------------------
     # Доступ к значениям
     # ------------------------------------------------------------------
 
     def get(self, section: str, option: str, fallback: str = '') -> str:
-        if not self.manager:
+        """Значение как строка. Отсутствующий ключ берётся из реестра настроек."""
+        if not self.store:
             return fallback
-        return self.manager.config.get(section, option, fallback=fallback)
+
+        if schema.get(section, option) is None and not self.store.document.has_option(section, option):
+            return fallback
+
+        return self.store.raw(section, option)
 
     def get_int(self, section: str, option: str, fallback: int = 0) -> int:
-        raw = self.get(section, option, str(fallback))
-        try:
-            return int(str(raw).strip())
-        except (TypeError, ValueError):
-            return fallback
+        value = self.value(section, option)
+        return value if isinstance(value, int) and not isinstance(value, bool) else fallback
 
     def get_bool(self, section: str, option: str, fallback: bool = False) -> bool:
-        raw = self.get(section, option, '').strip().lower()
-        if raw in ('true', 'yes', '1', 'on'):
-            return True
-        if raw in ('false', 'no', '0', 'off'):
-            return False
-        return fallback
+        value = self.value(section, option)
+        return value if isinstance(value, bool) else fallback
+
+    def value(self, section: str, option: str) -> Any:
+        """Значение, разобранное типом из реестра настроек"""
+        if not self.store:
+            return None
+        return self.store.value(section, option)
 
     def set(self, section: str, option: str, value: Any):
         self._require_loaded()
-        self.manager.set_value(section, option, value)
-        self._dirty = True
+        self.store.set_value(section, option, value)
 
     def set_secret(self, section: str, option: str, plaintext: str):
         """Шифрует и записывает секрет. Пустая строка очищает значение."""
         self._require_loaded()
-        self.manager.set_secret(section, option, plaintext)
-        self._dirty = True
+        self.store.set_secret(section, option, plaintext)
 
     def is_encrypted(self, section: str, option: str) -> bool:
-        if not self.manager:
-            return False
-        return self.manager.is_encrypted(section, option)
+        return bool(self.store) and self.store.is_encrypted(section, option)
 
     def has_value(self, section: str, option: str) -> bool:
-        return bool(self.get(section, option, '').strip())
-
-    def section_items(self, section: str) -> Dict[str, str]:
-        """Все пары ключ-значение секции (пустой словарь, если секции нет)"""
-        if not self.manager or not self.manager.config.has_section(section):
-            return {}
-        return dict(self.manager.config.items(section))
-
-    def remove_option(self, section: str, option: str):
-        if not self.manager or not self.manager.config.has_section(section):
-            return
-        if self.manager.config.remove_option(section, option):
-            self._dirty = True
+        return bool(self.store) and self.store.is_set(section, option)
 
     # ------------------------------------------------------------------
-    # Служебное
+    # Состояние
     # ------------------------------------------------------------------
-
-    def validate(self) -> List[str]:
-        """Возвращает список проблем конфигурации (пустой — всё в порядке)"""
-        if not self.manager:
-            return [self.load_error or 'Конфигурация не загружена']
-        try:
-            return self.manager.validate()
-        except Exception as e:
-            return [f'Ошибка валидации: {e}']
 
     @property
     def is_dirty(self) -> bool:
-        return self._dirty
+        """Есть ли правки, которых нет в файле"""
+        return bool(self.store) and self.store.is_dirty
+
+    def changes(self) -> List[Change]:
+        """Что именно изменится при сохранении"""
+        return self.store.changes() if self.store else []
+
+    def changed_groups(self) -> List[str]:
+        """Группы настроек с несохранёнными правками — для пометок в интерфейсе"""
+        return self.store.changed_groups() if self.store else []
+
+    def discard_changes(self):
+        if self.store:
+            self.store.reset()
+
+    def validate(self) -> List[str]:
+        """Список проблем конфигурации с учётом несохранённых правок"""
+        if not self.store:
+            return [self.load_error or 'Конфигурация не загружена']
+
+        problems = list(self.store.problems())
+
+        if not DPAPI_AVAILABLE:
+            for section, option in schema.secret_idents():
+                if self.store.is_encrypted(section, option):
+                    problems.append(
+                        'В конфигурации есть зашифрованные значения, '
+                        'но модуль pywin32 не установлен — расшифровать их нечем'
+                    )
+                    break
+
+        return problems
 
     @property
     def encryption_available(self) -> bool:
         """Доступно ли шифрование (на не-Windows системах pywin32 отсутствует)"""
         return DPAPI_AVAILABLE
+
+    # ------------------------------------------------------------------
+    # Производные пути и подключения
+    # ------------------------------------------------------------------
 
     def webhook_url(self) -> Optional[str]:
         """
@@ -178,33 +204,53 @@ class ConfigService:
         if not self.manager:
             return None
         try:
-            b24 = self.manager.get_bitrix24_config()
-            return b24.get('webhook_url')
+            return self.manager.get_bitrix24_config().get('webhook_url')
         except Exception:
             return None
 
+    def database_config(self) -> Optional[Dict[str, Any]]:
+        """Параметры подключения к базе с расшифрованным паролем"""
+        if not self.manager:
+            return None
+        return self.manager.get_database_config()
+
     def queue_file_path(self) -> Path:
         """Путь к файлу очереди с учётом настройки [Queue].persistence_file"""
-        configured = self.get('Queue', 'persistence_file', '').strip()
-        if not configured:
-            return self.workspace.queue_path
-
-        path = Path(configured)
-        if path.is_absolute():
-            return path
-        return self.workspace.workdir / path
+        return self._resolve_path(self.get('Queue', 'persistence_file'), self.workspace.queue_path)
 
     def log_dir_path(self) -> Path:
         """Путь к каталогу логов с учётом настройки [Logging].log_dir"""
-        configured = self.get('Logging', 'log_dir', '').strip()
+        return self._resolve_path(self.get('Logging', 'log_dir'), self.workspace.log_dir)
+
+    # ------------------------------------------------------------------
+
+    def _resolve_path(self, configured: str, default: Path) -> Path:
+        configured = (configured or '').strip()
         if not configured:
-            return self.workspace.log_dir
+            return default
 
         path = Path(configured)
-        if path.is_absolute():
-            return path
-        return self.workspace.workdir / path
+        return path if path.is_absolute() else self.workspace.workdir / path
+
+    def _open_manager(self) -> ConfigManager:
+        return ConfigManager(
+            str(self.workspace.config_path),
+            require_config=False,
+            validate_on_load=False,
+            use_example_defaults=False
+        )
+
+    def _encrypt(self, plaintext: str) -> str:
+        """
+        Шифрование секрета через DPAPI.
+
+        Выполняет ConfigManager: у службы и приложения должен быть один
+        механизм, иначе служба не прочитает то, что записало приложение.
+        """
+        if not self.manager:
+            raise RuntimeError('Конфигурация не загружена')
+        return self.manager._encrypt_value(plaintext)
 
     def _require_loaded(self):
-        if not self.manager:
+        if not self.store:
             raise RuntimeError('Конфигурация не загружена')

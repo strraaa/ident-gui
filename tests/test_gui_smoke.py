@@ -1,0 +1,291 @@
+"""
+Сборка окна и страниц вживую.
+
+Тест не проверяет внешний вид — он ловит поломки стыка между страницами и
+службами: переименованный метод, изменившуюся сигнатуру, исчезнувший атрибут.
+Такое иначе обнаруживается только запуском на Windows.
+
+Пропускается, если PySide6 не установлен.
+"""
+
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
+try:
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+except ImportError:  # pragma: no cover
+    QApplication = None
+
+EXAMPLE = Path(__file__).resolve().parent.parent / 'config.example.ini'
+
+
+@unittest.skipIf(QApplication is None, 'PySide6 не установлен')
+class MainWindowSmokeTests(unittest.TestCase):
+    """Окно строится, страницы читают конфигурацию, сохранение доходит до файла"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        from gui.main_window import MainWindow
+        from gui.services.app_settings import AppSettings
+        from gui.services.paths import Workspace
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.workdir = Path(self._tmp.name)
+        self.config_path = self.workdir / 'config.ini'
+        self.config_path.write_bytes(EXAMPLE.read_bytes())
+
+        # Собственный файл настроек, чтобы не писать в реестр машины
+        self.app_settings = AppSettings(
+            QSettings(str(self.workdir / 'app.ini'), QSettings.IniFormat)
+        )
+
+        self._silence_dialogs()
+
+        self.window = MainWindow(Workspace(self.workdir), self.app_settings)
+
+    def tearDown(self):
+        self.window.close()
+        self._tmp.cleanup()
+
+    def _silence_dialogs(self):
+        """
+        Модальные окна в тестах отвечают сами.
+
+        Окно спрашивает о несохранённых правках при закрытии, поэтому без
+        заглушки прогон встаёт на первом же тесте, который что-то поменял.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        self.dialogs = []
+        self.answer = QMessageBox.Yes
+
+        def question(parent, title, text, *args, **kwargs):
+            self.dialogs.append(('question', title, text))
+            return self.answer
+
+        def notice(kind):
+            def handler(parent, title, text, *args, **kwargs):
+                self.dialogs.append((kind, title, text))
+                return QMessageBox.Ok
+            return handler
+
+        for name, handler in (
+            ('question', question),
+            ('warning', notice('warning')),
+            ('information', notice('information')),
+            ('critical', notice('critical')),
+        ):
+            patcher = mock.patch.object(QMessageBox, name, staticmethod(handler))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    # ------------------------------------------------------------------
+    # Каркас
+    # ------------------------------------------------------------------
+
+    def test_all_pages_are_built(self):
+        titles = [page.title for page in self.window.pages]
+
+        self.assertEqual(
+            titles,
+            ['Обзор', 'Очередь', 'Журнал', 'Подключения', 'Поля',
+             'Стадии и воронка', 'Синхронизация']
+        )
+
+    def test_navigation_groups_pages_by_section(self):
+        self.assertEqual(
+            self.window.nav.keys(),
+            ['overview', 'queue', 'logs', 'connections', 'fields', 'stages', 'sync']
+        )
+
+    def test_selecting_a_page_switches_the_stack(self):
+        self.window.nav.select('fields')
+
+        self.assertIs(self.window.current_page(), self.window.fields_page)
+        self.assertEqual(self.app_settings.page(), 'fields')
+
+    def test_settings_pages_are_marked_as_such(self):
+        settings_keys = {page.key for page in self.window.pages if page.is_settings}
+
+        self.assertEqual(settings_keys, {'connections', 'fields', 'stages', 'sync'})
+
+    # ------------------------------------------------------------------
+    # Конфигурация
+    # ------------------------------------------------------------------
+
+    def test_pages_load_values_from_configuration(self):
+        self.assertEqual(self.window.sync_page.spin_interval.value(), 2)
+        self.assertEqual(self.window.sync_page.spin_batch.value(), 50)
+        self.assertEqual(self.window.connections_page.txt_db_name.text(), 'IdentDB')
+        self.assertEqual(self.window.connections_page.spin_db_port.value(), 1433)
+
+    def test_stage_mapping_is_parsed_into_rows(self):
+        table = self.window.stages_page.table
+
+        self.assertEqual(table.rowCount(), 6)
+        self.assertEqual(table.cellWidget(0, 0).currentText(), 'Запланирован')
+        self.assertEqual(self.window.stages_page._row_stage(0), 'NEW')
+
+    def test_overview_fills_in_when_it_becomes_current(self):
+        """Страница обновляется по переходу на неё, а не только по таймеру"""
+        self.window.show()
+        self.window.nav.select('overview')
+        self.window.overview_page.refresh()
+
+        self.assertEqual(
+            self.window.overview_page.lbl_config_path.text(),
+            str(self.config_path)
+        )
+        self.assertEqual(
+            self.window.overview_page.lbl_config_problems.text(),
+            'Проблем не обнаружено'
+        )
+
+    def test_clean_configuration_has_no_complaints(self):
+        self.assertEqual(self.window._collect_problems(), [])
+
+    def test_field_editors_show_configured_codes(self):
+        codes = [
+            self.window.fields_page._editor_value(editor)
+            for editor in self.window.fields_page._editors.values()
+        ]
+
+        self.assertIn('UF_CRM_1769072841035', codes)
+
+    # ------------------------------------------------------------------
+    # Несохранённые правки
+    # ------------------------------------------------------------------
+
+    def test_edit_marks_the_page_in_the_navigation(self):
+        """Пометка появляется на той странице, где правили"""
+        self.window.sync_page.spin_interval.setValue(9)
+        self.window._apply_pages()
+        self.window._update_state()
+
+        self.assertTrue(self.window.nav.is_dirty('sync'))
+        self.assertFalse(self.window.nav.is_dirty('connections'))
+
+    def test_save_button_is_off_until_something_changes(self):
+        self.window._update_state()
+        self.assertFalse(self.window.btn_save.isEnabled())
+
+        self.window.sync_page.spin_interval.setValue(9)
+        self.window._apply_pages()
+        self.window._update_state()
+
+        self.assertTrue(self.window.btn_save.isEnabled())
+
+    def test_footer_counts_unsaved_changes(self):
+        self.window.sync_page.spin_interval.setValue(9)
+        self.window.sync_page.spin_batch.setValue(75)
+        self.window._apply_pages()
+        self.window._update_state()
+
+        self.assertIn('Несохранённых изменений: 2', self.window.lbl_footer.text())
+
+    def test_edit_and_save_reaches_the_file(self):
+        self.window.sync_page.spin_interval.setValue(9)
+        self.window._apply_pages()
+
+        self.assertTrue(self.window.config.is_dirty)
+
+        backup_path = self.window.config.save()
+        written = self.config_path.read_text(encoding='utf-8-sig')
+
+        self.assertIn('interval_minutes = 9', written)
+        self.assertIn('# Интервал синхронизации записей в минутах', written)
+        self.assertTrue(backup_path.exists())
+        self.assertFalse(self.window.config.is_dirty)
+
+    # ------------------------------------------------------------------
+    # Сообщения и оформление
+    # ------------------------------------------------------------------
+
+    def test_missing_configuration_is_reported_in_a_banner(self):
+        """Раньше это было модальное окно с вопросом"""
+        from gui.main_window import MainWindow
+        from gui.services.app_settings import AppSettings
+        from gui.services.paths import Workspace
+
+        with tempfile.TemporaryDirectory() as empty:
+            settings = AppSettings(QSettings(str(Path(empty) / 'app.ini'), QSettings.IniFormat))
+            window = MainWindow(Workspace(Path(empty)), settings)
+
+            self.assertIn('нет файла config.ini', window.banner.text)
+            self.assertEqual(window.banner.tone, 'warning')
+            self.assertFalse(window.connections_page.isEnabled())
+
+            window.close()
+
+    def test_theme_switches_in_a_cycle(self):
+        self.assertEqual(self.app_settings.theme(), 'system')
+
+        self.window._on_toggle_theme()
+        self.assertEqual(self.app_settings.theme(), 'light')
+
+        self.window._on_toggle_theme()
+        self.assertEqual(self.app_settings.theme(), 'dark')
+
+        self.window._on_toggle_theme()
+        self.assertEqual(self.app_settings.theme(), 'system')
+
+    def test_window_geometry_is_remembered(self):
+        self.window.resize(1000, 700)
+        self.window.close()
+
+        self.assertIsNotNone(self.app_settings.geometry())
+
+
+@unittest.skipIf(QApplication is None, 'PySide6 не установлен')
+class ThemeTests(unittest.TestCase):
+    """Оформление собирается для обеих тем"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_both_palettes_define_the_same_names(self):
+        from gui.theme.tokens import DARK, LIGHT
+
+        self.assertEqual(set(LIGHT.as_dict()), set(DARK.as_dict()))
+
+    def test_every_colour_is_a_hex_value(self):
+        from gui.theme.tokens import DARK, LIGHT
+
+        for palette in (LIGHT, DARK):
+            for name, value in palette.as_dict().items():
+                self.assertRegex(value, r'^#[0-9A-Fa-f]{6}$', f'{palette.name}.{name}')
+
+    def test_stylesheet_uses_the_palette_it_was_given(self):
+        from gui.theme.stylesheet import build_stylesheet
+        from gui.theme.tokens import DARK, LIGHT
+
+        light = build_stylesheet(LIGHT)
+        dark = build_stylesheet(DARK)
+
+        self.assertIn(LIGHT.accent, light)
+        self.assertIn(DARK.accent, dark)
+        self.assertNotIn(DARK.background, light)
+
+    def test_apply_theme_returns_the_applied_name(self):
+        from gui.theme import apply_theme
+
+        self.assertEqual(apply_theme(self.app, 'dark'), 'dark')
+        self.assertEqual(apply_theme(self.app, 'light'), 'light')
+        self.assertIn(apply_theme(self.app, 'system'), ('light', 'dark'))
+
+
+if __name__ == '__main__':
+    unittest.main()

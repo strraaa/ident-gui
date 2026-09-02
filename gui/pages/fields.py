@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
 from gui.services.b24_service import B24Service
 from gui.services.config_service import ConfigService
 from gui.services.workers import WorkerRunner
-from gui.tabs.base import BaseTab
+from gui.pages.page import Page, Section
+from gui.theme import set_strong, set_tone
 
 
 class FieldSpec(NamedTuple):
@@ -75,11 +76,14 @@ ENTITY_TITLES = {
 COLUMNS = ['Сущность', 'Что записываем', 'Поле в Битрикс24']
 
 
-class FieldsTab(BaseTab):
+class FieldsPage(Page):
     """Настройка соответствия полей"""
 
+    key = 'fields'
     title = 'Поля'
-    is_settings_tab = True
+    hint = 'Соответствие данных приёма полям Битрикс24'
+    section = Section.SETTINGS
+    is_settings = True
 
     def __init__(self, config: ConfigService, parent=None):
         super().__init__(config, parent)
@@ -101,7 +105,7 @@ class FieldsTab(BaseTab):
 
         self.lbl_load_state = QLabel('Список полей портала не загружен — доступен ручной ввод')
         self.lbl_load_state.setWordWrap(True)
-        self.lbl_load_state.setObjectName('hint')
+        set_tone(self.lbl_load_state, 'muted')
 
         top.addWidget(self.btn_load)
         top.addWidget(self.lbl_load_state, stretch=1)
@@ -129,7 +133,7 @@ class FieldsTab(BaseTab):
             'записываться не в те поля.'
         )
         hint.setWordWrap(True)
-        hint.setObjectName('hint')
+        set_tone(hint, 'muted')
         layout.addWidget(hint)
 
     def _build_rows(self):
@@ -204,7 +208,7 @@ class FieldsTab(BaseTab):
     def _on_load_fields(self):
         self.btn_load.setEnabled(False)
         self.lbl_load_state.setText('Загружаем список полей портала…')
-        self.lbl_load_state.setStyleSheet('')
+        set_tone(self.lbl_load_state, 'muted')
 
         self.runner.run(
             self.b24_service.load_all_user_fields,
@@ -237,12 +241,12 @@ class FieldsTab(BaseTab):
             f"контакт — {len(fields.get('contact', []))}, "
             f"лид — {len(fields.get('lead', []))})"
         )
-        self.lbl_load_state.setStyleSheet('color: #1a7f37;')
+        set_tone(self.lbl_load_state, 'success')
 
     def _on_fields_failed(self, error: str):
         self.btn_load.setEnabled(True)
         self.lbl_load_state.setText(f'Не удалось загрузить поля: {error}')
-        self.lbl_load_state.setStyleSheet('color: #b42318;')
+        set_tone(self.lbl_load_state, 'danger')
 
         QMessageBox.warning(
             self,
