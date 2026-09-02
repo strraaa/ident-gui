@@ -142,9 +142,10 @@ class ConfigServiceTests(unittest.TestCase):
         self.assertEqual(self.service.queue_file_path(), self.workdir / 'data' / 'queue.json')
 
     def test_absolute_path_in_configuration_is_used_as_is(self):
-        self.service.set('Logging', 'log_dir', str(Path('/var/log/ident')))
+        absolute = Path(self.workdir.anchor) / 'var' / 'log' / 'ident'
+        self.service.set('Logging', 'log_dir', str(absolute))
 
-        self.assertEqual(self.service.log_dir_path(), Path('/var/log/ident'))
+        self.assertEqual(self.service.log_dir_path(), absolute)
 
 
 if __name__ == '__main__':
