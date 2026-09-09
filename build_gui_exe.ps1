@@ -14,6 +14,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Русский текст в выводе Python: без этого на англоязычной Windows и на
+# раннере GitHub stdout получает кодировку системы (cp1252), и первая же
+# кириллическая строка валит сборку с UnicodeEncodeError
+$env:PYTHONUTF8 = "1"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+
 # GitHub Actions и прочие CI выставляют $env:CI — пауза там повесит job
 if ($env:CI) { $NoPause = $true }
 
