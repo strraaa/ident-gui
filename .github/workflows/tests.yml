@@ -10,6 +10,7 @@ on:
 jobs:
   tests:
     runs-on: windows-latest
+    timeout-minutes: 20
     env:
       PYTHONUTF8: "1"
     steps:
@@ -37,4 +38,6 @@ jobs:
 
       - name: Self-test
         shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: python gui_main.py --selftest
