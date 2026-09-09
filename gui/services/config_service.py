@@ -36,6 +36,10 @@ class ConfigService:
         self.manager: Optional[ConfigManager] = None
         self.load_error: Optional[str] = None
 
+        # Отпечаток файла на момент чтения: по нему видно, что конфигурацию
+        # правил кто-то ещё, пока она была открыта здесь
+        self._signature: Optional[tuple] = None
+
     # ------------------------------------------------------------------
     # Загрузка и сохранение
     # ------------------------------------------------------------------
@@ -59,6 +63,7 @@ class ConfigService:
                 self.workspace.config_path,
                 encryptor=self._encrypt
             )
+            self._signature = self._file_signature()
             return True
         except Exception as e:
             self.store = None
@@ -93,6 +98,7 @@ class ConfigService:
         self._require_loaded()
 
         backup = self.store.save(self.workspace.config_path)
+        self._signature = self._file_signature()
 
         try:
             self.manager = self._open_manager()
@@ -139,6 +145,37 @@ class ConfigService:
         """Шифрует и записывает секрет. Пустая строка очищает значение."""
         self._require_loaded()
         self.store.set_secret(section, option, plaintext)
+
+    def changed_on_disk(self) -> bool:
+        """
+        Изменился ли config.ini после того, как приложение его прочитало.
+
+        Хранилище держит снимок файла с момента открытия и при сохранении
+        записывает его целиком. Если за это время файл правил кто-то ещё —
+        второй администратор, скрипт, блокнот, — его правки будут стёрты
+        молча. Спросить об этом должно окно.
+        """
+        if self._signature is None:
+            return False
+        return self._file_signature() != self._signature
+
+    def _file_signature(self) -> Optional[tuple]:
+        try:
+            stat = self.workspace.config_path.stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
+    def discard(self, section: str, option: str):
+        """
+        Отменяет несохранённую правку одного параметра.
+
+        Нужно полям, у которых пустой ввод означает «оставить как было»:
+        секретам. Без этого набранное и стёртое значение осталось бы
+        в конфигурации обрезанным.
+        """
+        if self.store:
+            self.store.discard(section, option)
 
     def is_encrypted(self, section: str, option: str) -> bool:
         return bool(self.store) and self.store.is_encrypted(section, option)

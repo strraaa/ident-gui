@@ -28,6 +28,7 @@ class SyncPage(Page):
     def __init__(self, config: ConfigService, parent=None):
         super().__init__(config, parent)
         self._build_ui()
+        self.watch_editors()
 
     # ------------------------------------------------------------------
 

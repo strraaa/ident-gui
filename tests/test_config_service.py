@@ -147,6 +147,30 @@ class ConfigServiceTests(unittest.TestCase):
 
         self.assertEqual(self.service.log_dir_path(), absolute)
 
+    def test_external_change_of_the_file_is_noticed(self):
+        """
+        Хранилище пишет файл целиком из снимка, сделанного при открытии,
+        поэтому правку, сделанную другим процессом, оно затрёт. Окно должно
+        узнать об этом до записи.
+        """
+        self.assertFalse(self.service.changed_on_disk())
+
+        # Кто-то ещё дописал строку в конфигурацию
+        text = self.config_path.read_text(encoding='utf-8-sig')
+        self.config_path.write_text(text + '\n; правка со стороны\n', encoding='utf-8')
+
+        self.assertTrue(self.service.changed_on_disk())
+
+    def test_saving_resets_the_file_signature(self):
+        text = self.config_path.read_text(encoding='utf-8-sig')
+        self.config_path.write_text(text + '\n; правка со стороны\n', encoding='utf-8')
+        self.assertTrue(self.service.changed_on_disk())
+
+        self.service.set('Sync', 'batch_size', 77)
+        self.service.save()
+
+        self.assertFalse(self.service.changed_on_disk())
+
 
 if __name__ == '__main__':
     unittest.main()

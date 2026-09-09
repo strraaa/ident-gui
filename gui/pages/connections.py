@@ -37,6 +37,7 @@ class ConnectionsPage(Page):
         self.db_service = DatabaseService(config)
         self.b24_service = B24Service(config)
         self._build_ui()
+        self.watch_editors()
 
     # ------------------------------------------------------------------
 
@@ -191,11 +192,14 @@ class ConnectionsPage(Page):
         self.config.set('Database', 'connection_timeout', self.spin_db_conn_timeout.value())
         self.config.set('Database', 'query_timeout', self.spin_db_query_timeout.value())
 
-        # Пустое поле означает «оставить прежний пароль», а не «стереть»
+        # Пустое поле означает «оставить прежний пароль», а не «стереть».
+        # Правка отменяется, а не записывается пустой: иначе стёртый в поле
+        # набранный пароль остался бы в конфигурации обрезанным.
         new_password = self.txt_db_password.text()
         if new_password:
             self.config.set_secret('Database', 'password', new_password)
-            self.txt_db_password.clear()
+        else:
+            self.config.discard('Database', 'password')
 
         self.config.set('bitrix', 'webhook_url', self.txt_webhook.text().strip())
         self.config.set('bitrix', 'request_timeout', self.spin_b24_timeout.value())
@@ -203,6 +207,9 @@ class ConnectionsPage(Page):
         self.config.set('bitrix', 'rate_limit', self.spin_rate_limit.value())
         self.config.set('bitrix', 'default_assigned_by_id', self.txt_assigned_by.text().strip())
 
+    def on_saved(self):
+        """Пароль записан и зашифрован — поле ввода больше не нужно"""
+        self.txt_db_password.clear()
         self._update_password_state()
 
     def validate(self) -> List[str]:

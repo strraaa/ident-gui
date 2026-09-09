@@ -55,6 +55,7 @@ class StagesPage(Page):
         self._stages: List[Dict[str, str]] = []
         self._lead_statuses: List[Dict[str, str]] = []
         self._build_ui()
+        self.watch_editors()
 
     # ------------------------------------------------------------------
 
@@ -274,6 +275,11 @@ class StagesPage(Page):
         self._set_combo_value(stage_editor, stage)
         self.table.setCellWidget(row, 1, stage_editor)
 
+        # Редакторы строки созданы только что — обход при сборке страницы
+        # их не видел, подключаем отдельно
+        self.watch_editors(status_editor)
+        self.watch_editors(stage_editor)
+
     def _remove_selected_row(self):
         rows = sorted({index.row() for index in self.table.selectionModel().selectedRows()}, reverse=True)
 
@@ -283,6 +289,10 @@ class StagesPage(Page):
 
         for row in rows:
             self.table.removeRow(row)
+
+        # Удаление строки — такая же правка, как изменение поля,
+        # но сигнала об этом ни один виджет не даёт
+        self.notify_changed()
 
     def _row_status(self, row: int) -> str:
         editor = self.table.cellWidget(row, 0)
