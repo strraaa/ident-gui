@@ -55,4 +55,17 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           $notes = if (Test-Path RELEASE_NOTES.md) { @("--notes-file", "RELEASE_NOTES.md") } else { @("--notes", "") }
-          gh release create $env:GITHUB_REF_NAME $env:ZIP --title "ident-gui $version" @notes
+          $exists = $false
+          try {
+              gh release view $env:GITHUB_REF_NAME --json tagName | Out-Null
+              $exists = ($LASTEXITCODE -eq 0)
+          } catch {
+              $exists = $false
+          }
+          $global:LASTEXITCODE = 0
+          if ($exists) {
+              gh release upload $env:GITHUB_REF_NAME $env:ZIP --clobber
+          } else {
+              gh release create $env:GITHUB_REF_NAME $env:ZIP --title "ident-gui $version" @notes
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }

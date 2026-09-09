@@ -2,7 +2,7 @@
 
 [![Release](https://img.shields.io/badge/build-GitHub%20Actions-blue)](https://github.com/ms123131/ident-gui/actions/workflows/release.yml)
 [![Tests](https://img.shields.io/badge/tests-unittest-blue)](https://github.com/ms123131/ident-gui/actions/workflows/tests.yml)
-[![Release](https://img.shields.io/badge/release-0.0.1-green)](https://github.com/ms123131/ident-gui/releases)
+[![Release](https://img.shields.io/badge/release-0.0.2-green)](https://github.com/ms123131/ident-gui/releases)
 [![License](https://img.shields.io/badge/license-proprietary-lightgrey)](#лицензия)
 
 Десктопное приложение (PySide6) для настройки и обслуживания синхронизатора Ident → Битрикс24. Служба синхронизации и приложение — два отдельных процесса, работающих
