@@ -92,6 +92,7 @@ class FieldsPage(Page):
         self._editors: Dict[int, QComboBox] = {}
         self._portal_fields: Dict[str, List[Dict[str, str]]] = {}
         self._build_ui()
+        self.watch_editors()
 
     # ------------------------------------------------------------------
 

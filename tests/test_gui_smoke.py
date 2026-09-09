@@ -122,6 +122,64 @@ class MainWindowSmokeTests(unittest.TestCase):
         self.assertEqual(settings_keys, {'connections', 'fields', 'stages', 'sync'})
 
     # ------------------------------------------------------------------
+    # Отслеживание правок
+    # ------------------------------------------------------------------
+
+    def _settle(self):
+        """Дожидается отложенного пересчёта состояния после правки"""
+        from PySide6.QtCore import QEventLoop, QTimer
+
+        loop = QEventLoop()
+        QTimer.singleShot(self.window._edit_timer.interval() + 150, loop.quit)
+        loop.exec()
+
+    def test_editing_a_field_enables_saving(self):
+        """
+        Главный регресс приложения: редакторы не были связаны с хранилищем,
+        поэтому признак несохранённого оставался ложным, а кнопка «Сохранить»
+        ждала именно его — и не включалась никогда.
+        """
+        self.assertFalse(self.window.btn_save.isEnabled())
+
+        self.window.connections_page.txt_db_server.setText('SQL-01\\IDENT')
+        self.window.connections_page.txt_db_server.textEdited.emit('SQL-01\\IDENT')
+        self._settle()
+
+        self.assertTrue(self.window.config.is_dirty)
+        self.assertTrue(self.window.btn_save.isEnabled())
+        self.assertTrue(self.window.btn_reload.isEnabled())
+
+    def test_editing_marks_the_page_in_navigation(self):
+        self.window.sync_page.spin_batch.setValue(75)
+        self._settle()
+
+        self.assertTrue(self.window.nav.is_dirty('sync'))
+        self.assertFalse(self.window.nav.is_dirty('connections'))
+
+    def test_typed_and_erased_password_does_not_reach_configuration(self):
+        """Пустое поле пароля означает «оставить прежний», а не «записать набранное»"""
+        field = self.window.connections_page.txt_db_password
+
+        field.setText('partial')
+        field.textEdited.emit('partial')
+        self._settle()
+
+        field.clear()
+        field.textEdited.emit('')
+        self._settle()
+
+        changed = {change.key for change in self.window.config.changes()}
+        self.assertNotIn('password', changed)
+
+    def test_removing_a_mapping_row_is_a_change(self):
+        table = self.window.stages_page.table
+        table.selectRow(0)
+        self.window.stages_page._remove_selected_row()
+        self._settle()
+
+        self.assertTrue(self.window.config.is_dirty)
+
+    # ------------------------------------------------------------------
     # Конфигурация
     # ------------------------------------------------------------------
 

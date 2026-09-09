@@ -13,7 +13,7 @@
 
 from typing import List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget
@@ -39,6 +39,9 @@ WINDOW_TITLE = 'Настройки интеграции Ident → Битрикс
 
 #: сколько пунктов показывать списком, прежде чем сворачивать в счётчик
 LIST_LIMIT = 12
+
+#: задержка между правкой поля и пересчётом состояния, мс
+EDIT_DEBOUNCE_MS = 200
 
 THEME_ORDER = ('system', 'light', 'dark')
 
@@ -106,6 +109,18 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         for page in self.pages:
             self.stack.addWidget(self._scrollable(page))
+
+        # Пересчёт после правки идёт с задержкой: страница сообщает о каждом
+        # нажатии клавиши, а переносить значения и считать разницу на каждый
+        # символ незачем.
+        self._edit_timer = QTimer(self)
+        self._edit_timer.setSingleShot(True)
+        self._edit_timer.setInterval(EDIT_DEBOUNCE_MS)
+        self._edit_timer.timeout.connect(self._on_edited)
+
+        for page in self.pages:
+            if page.is_settings:
+                page.changed.connect(self._edit_timer.start)
 
     @staticmethod
     def _scrollable(page: Page) -> QScrollArea:
@@ -254,6 +269,10 @@ class MainWindow(QMainWindow):
         )
 
     def _reload_pages(self):
+        # Страницы сейчас заполняются из файла и сообщат об этом как о правке —
+        # отложенный пересчёт от прошлых правок больше не актуален
+        self._edit_timer.stop()
+
         for page in self.pages:
             page.load_from_config()
 
@@ -343,11 +362,18 @@ class MainWindow(QMainWindow):
             self._update_state()
             return
 
+        if not self._confirm_external_changes():
+            return
+
         try:
             backup_path = self.config.save()
         except Exception as e:
             self.banner.show_error(f'Не удалось сохранить настройки: {e}')
             return
+
+        for page in self.pages:
+            if page.is_settings:
+                page.on_saved()
 
         self._reload_pages()
         self._update_state()
@@ -358,20 +384,33 @@ class MainWindow(QMainWindow):
 
         self._offer_restart()
 
+    def _on_edited(self):
+        """Оператор что-то изменил: переносим значения и пересчитываем состояние"""
+        self._apply_pages()
+        self._update_state()
+
     def _apply_pages(self):
         """
         Переносит значения страниц в конфигурацию — без записи на диск.
 
-        Вызывается не только перед сохранением: иначе признак несохранённых
-        правок оставался бы ложным до самого нажатия кнопки, и ни
-        предупреждение при закрытии окна, ни пометки в меню не работали бы.
+        Вызывается после каждой правки, а не только перед сохранением: иначе
+        признак несохранённых правок оставался бы ложным до самого нажатия
+        кнопки, а кнопка — недоступной, потому что ждёт этого признака.
         """
         if not self.config.store:
             return
 
         for page in self.pages:
-            if page.is_settings:
+            if not page.is_settings:
+                continue
+
+            try:
                 page.apply_to_config()
+            except Exception as e:
+                # Переносу значений нельзя падать: в PySide6 необработанное
+                # исключение в обработчике сигнала завершает процесс молча.
+                # Самый вероятный случай — недоступное шифрование секрета.
+                self.banner.show_error(f'Страница «{page.title}»: {e}')
 
     def _collect_problems(self) -> List[str]:
         problems = []
@@ -414,6 +453,31 @@ class MainWindow(QMainWindow):
             + self._bullets([change.describe() for change in changes]),
             QMessageBox.Save | QMessageBox.Cancel,
             QMessageBox.Save
+        )
+
+        return answer == QMessageBox.Save
+
+    def _confirm_external_changes(self) -> bool:
+        """
+        Файл могли изменить, пока он был открыт здесь.
+
+        Приложение пишет конфигурацию целиком из снимка, сделанного при
+        открытии, поэтому чужие правки оно затирает. Молча этого делать
+        нельзя — спрашиваем.
+        """
+        if not self.config.changed_on_disk():
+            return True
+
+        answer = QMessageBox.warning(
+            self,
+            'Файл изменился на диске',
+            f'{self.workspace.config_path.name} изменился после того, как приложение '
+            f'его открыло — конфигурацию правил кто-то ещё.\n\n'
+            f'Если продолжить, эти изменения будут заменены значениями из окна. '
+            f'Чтобы их увидеть, отмените запись и нажмите «Отменить изменения» — '
+            f'файл будет перечитан.',
+            QMessageBox.Save | QMessageBox.Cancel,
+            QMessageBox.Cancel
         )
 
         return answer == QMessageBox.Save
