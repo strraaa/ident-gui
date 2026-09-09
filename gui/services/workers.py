@@ -9,6 +9,12 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QThread, Signal
 
+#: потоки, не успевшие завершиться к закрытию окна
+#:
+#: Ссылка держится до конца работы процесса: без неё объект будет собран
+#: сборщиком мусора, а деструктор работающего QThread вызывает abort().
+_detached = []
+
 
 class Worker(QThread):
     """Выполняет функцию в фоне и отдаёт результат сигналом"""
@@ -55,12 +61,32 @@ class WorkerRunner:
         worker.succeeded.connect(on_success)
         worker.failed.connect(on_error)
         worker.finished.connect(cleanup)
+
+        # Удаление объекта потока поручается Qt: он сделает это в цикле
+        # событий после того, как поток действительно завершился. Сборщик
+        # мусора Python такой гарантии не даёт, а разрушение работающего
+        # QThread завершает процесс аварийно.
+        worker.finished.connect(worker.deleteLater)
+
         worker.start()
 
         return worker
 
     def wait_all(self, timeout_ms: int = 3000):
-        """Дожидается завершения потоков — вызывается при закрытии приложения"""
+        """
+        Дожидается завершения потоков — вызывается при закрытии приложения.
+
+        Не дождавшиеся откладываются в сторону, а не бросаются: у обращения
+        к SQL Server таймаут может быть и десять минут, столько держать
+        закрывающееся окно нельзя, но и разрушать работающий поток тоже.
+        """
         for worker in list(self._workers):
+            if not worker.isRunning():
+                continue
+
+            worker.wait(timeout_ms)
+
             if worker.isRunning():
-                worker.wait(timeout_ms)
+                _detached.append(worker)
+                if worker in self._workers:
+                    self._workers.remove(worker)

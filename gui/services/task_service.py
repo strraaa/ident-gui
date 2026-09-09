@@ -17,6 +17,11 @@ from .paths import TASK_NAME, TASK_PATH
 # Не показывать окно консоли при вызове PowerShell из GUI
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == 'win32' else 0
 
+# PowerShell 5.1 пишет вывод в кодировке консоли (обычно cp866), а Python
+# по умолчанию читает его в кодировке системы (cp1251) — русские сообщения
+# планировщика превращались в мусор. Договариваемся об UTF-8 с обеих сторон.
+_FORCE_UTF8 = "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
+
 STATE_TITLES = {
     'Ready': 'Готова к запуску',
     'Running': 'Работает',
@@ -180,9 +185,12 @@ class TaskService:
     def _run_powershell(script: str, timeout: int = 30) -> tuple[int, str, str]:
         try:
             result = subprocess.run(
-                ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
+                ['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                 _FORCE_UTF8 + script],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=timeout,
                 creationflags=_CREATE_NO_WINDOW
             )

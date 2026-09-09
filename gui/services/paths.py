@@ -28,6 +28,18 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def resource_path(*parts: str) -> Path:
+    """
+    Путь к файлу, вложенному в приложение (иконка, образец конфигурации).
+
+    PyInstaller распаковывает такие файлы рядом с exe и сообщает корень
+    в `sys._MEIPASS`. При запуске из исходников корень — папка репозитория.
+    """
+    base = getattr(sys, '_MEIPASS', None)
+    root = Path(base) if base else Path(__file__).resolve().parent.parent.parent
+    return root.joinpath(*parts)
+
+
 def default_install_dir() -> Path:
     """Штатный каталог установки службы"""
     program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
@@ -73,10 +85,22 @@ class Workspace:
 
     @property
     def example_config_path(self) -> Path:
-        """config.example.ini ищем рядом с конфигом, затем рядом с приложением"""
+        """
+        config.example.ini ищем рядом с конфигом, затем внутри приложения.
+
+        В собранном виде образец лежит не рядом с exe, а в каталоге ресурсов
+        (`_internal`), поэтому путь берётся через resource_path. Раньше здесь
+        был app_dir(), и в сборке образец не находился никогда — кнопка
+        «Создать из образца» не работала.
+        """
         local = self.workdir / 'config.example.ini'
         if local.exists():
             return local
+
+        bundled = resource_path('config.example.ini')
+        if bundled.exists():
+            return bundled
+
         return app_dir() / 'config.example.ini'
 
     @property
