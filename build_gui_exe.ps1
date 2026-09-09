@@ -1,10 +1,15 @@
-# Build IDENT -> Bitrix24 Settings GUI (One Directory Mode)
-# Creates dist\ident_settings\ident_settings.exe
+# Сборка приложения настроек Ident -> Битрикс24
+# Итог: dist\ident_settings\ident_settings.exe
+#
+# Состав сборки описан в ident_settings.spec — там же список того, что из
+# дистрибутива вычищается. Здесь только установка зависимостей, запуск
+# PyInstaller и проверка результата.
 #
 # -NoPause: не ждать Enter в конце (нужно для CI, раннер не интерактивный)
 
 param(
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$SkipInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,95 +23,108 @@ function Exit-Build {
     exit $Code
 }
 
+function Write-Step {
+    param([string]$Text)
+    Write-Host ""
+    Write-Host $Text -ForegroundColor Cyan
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Building IDENT Settings GUI" -ForegroundColor Cyan
+Write-Host "Сборка приложения настроек" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
 
-# Check Python
 $PythonCmd = "python"
 try {
     $PythonVersion = & $PythonCmd --version 2>&1
     Write-Host "Python: $PythonVersion" -ForegroundColor Green
 } catch {
-    Write-Host "ERROR: Python not found" -ForegroundColor Red
-    Write-Host ""
+    Write-Host "ОШИБКА: Python не найден" -ForegroundColor Red
     Exit-Build 1
 }
 
-if (-not (Test-Path "gui_main.py")) {
-    Write-Host "ERROR: gui_main.py not found" -ForegroundColor Red
-    Write-Host ""
-    Exit-Build 1
+foreach ($Required in @("gui_main.py", "ident_settings.spec", "gui\assets\app.ico")) {
+    if (-not (Test-Path $Required)) {
+        Write-Host "ОШИБКА: не найден $Required" -ForegroundColor Red
+        Exit-Build 1
+    }
 }
 
-# Install dependencies
-Write-Host "Installing dependencies..." -ForegroundColor Cyan
-$ReqLock = Join-Path $ScriptDir "requirements.lock"
-if (Test-Path $ReqLock) {
-    & $PythonCmd -m pip install --require-hashes -r $ReqLock
-} else {
-    Write-Host "WARNING: requirements.lock not found, falling back to requirements.txt" -ForegroundColor Yellow
-    & $PythonCmd -m pip install -r requirements.txt
+if (-not $SkipInstall) {
+    Write-Step "Установка зависимостей"
+
+    $ReqLock = Join-Path $ScriptDir "requirements.lock"
+    if (Test-Path $ReqLock) {
+        & $PythonCmd -m pip install --require-hashes -r $ReqLock
+    } else {
+        Write-Host "ВНИМАНИЕ: requirements.lock не найден, ставлю requirements.txt" -ForegroundColor Yellow
+        & $PythonCmd -m pip install -r requirements.txt
+    }
+
+    & $PythonCmd -m pip install -r requirements-gui.txt
+    if ($LASTEXITCODE -ne 0) { Exit-Build 1 }
 }
 
-# PySide6 lives in requirements-gui.txt: the sync service does not need it
-& $PythonCmd -m pip install -r requirements-gui.txt
-Write-Host ""
+Write-Step "Очистка прошлой сборки"
 
-# Clean previous GUI build only (do not touch the service build)
-if (Test-Path "dist\ident_settings") {
-    Write-Host "Cleaning dist\ident_settings..." -ForegroundColor Yellow
-    Remove-Item -Path "dist\ident_settings" -Recurse -Force
-}
-if (Test-Path "build\ident_settings") {
-    Remove-Item -Path "build\ident_settings" -Recurse -Force
-}
-if (Test-Path "ident_settings.spec") {
-    Remove-Item -Path "ident_settings.spec" -Force
+# Трогаем только каталоги приложения настроек: сборка службы лежит рядом
+foreach ($Path in @("dist\ident_settings", "build\ident_settings")) {
+    if (Test-Path $Path) { Remove-Item -Path $Path -Recurse -Force }
 }
 
-Write-Host ""
-Write-Host "Building EXE (onedir, no console)..." -ForegroundColor Cyan
-Write-Host ""
+Write-Step "Сборка (onedir, без консоли)"
 
 # ВАЖНО: config.ini намеренно НЕ вшивается в сборку.
 # Приложение читает конфигурацию из папки установки службы во время работы,
-# а секреты в дистрибутиве не нужны.
-& pyinstaller `
-    --name="ident_settings" `
-    --onedir `
-    --noconsole `
-    --hidden-import=requests `
-    --hidden-import=configparser `
-    --exclude-module=PySide6.QtWebEngineCore `
-    --exclude-module=PySide6.QtWebEngineWidgets `
-    --exclude-module=PySide6.QtQuick `
-    --exclude-module=PySide6.Qt3DCore `
-    --exclude-module=PySide6.QtCharts `
-    --exclude-module=PySide6.QtMultimedia `
-    --noconfirm `
-    gui_main.py
+# а секреты в дистрибутиве не нужны. Вшивается только config.example.ini.
+& pyinstaller --noconfirm --clean ident_settings.spec
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host ""
-    Write-Host "ERROR: Build failed" -ForegroundColor Red
-    Write-Host ""
+    Write-Host "ОШИБКА: сборка не удалась" -ForegroundColor Red
     Exit-Build 1
 }
 
+Write-Step "Самопроверка собранного приложения"
+
+# Приложение строит окно и выходит. Так на сборочной машине ловится
+# перестаравшаяся чистка библиотек Qt: без плагина платформы или стиля
+# окно не создастся, и код возврата будет не нулевым.
+$Exe = "dist\ident_settings\ident_settings.exe"
+
+# Две проверки подряд: offscreen ловит нехватку самих библиотек Qt,
+# запуск с обычной платформой — нехватку плагина qwindows и стиля
+foreach ($Platform in @("offscreen", "windows")) {
+    if ($Platform -eq "windows") {
+        Remove-Item Env:\QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+    } else {
+        $env:QT_QPA_PLATFORM = $Platform
+    }
+
+    & $Exe --selftest
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ОШИБКА: самопроверка не прошла ($Platform), код $LASTEXITCODE" -ForegroundColor Red
+        Remove-Item Env:\QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+        Exit-Build 1
+    }
+    Write-Host "  $Platform — в порядке" -ForegroundColor Green
+}
+Remove-Item Env:\QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+
+$SizeMb = [math]::Round(
+    ((Get-ChildItem "dist\ident_settings" -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1
+)
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "Build Complete" -ForegroundColor Green
+Write-Host "Сборка готова" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "EXE location: dist\ident_settings\ident_settings.exe" -ForegroundColor White
+Write-Host "Приложение: dist\ident_settings\ident_settings.exe" -ForegroundColor White
+Write-Host "Размер:     $SizeMb МБ" -ForegroundColor White
 Write-Host ""
-Write-Host "Usage:" -ForegroundColor Cyan
-Write-Host "  Run as Administrator - otherwise service restart is unavailable" -ForegroundColor Yellow
-Write-Host "  Custom folder: ident_settings.exe --workdir ""C:\Program Files\IdentBitrix24""" -ForegroundColor White
+Write-Host "Запуск от имени администратора нужен, чтобы перезапускать службу" -ForegroundColor Yellow
+Write-Host "Своя папка: ident_settings.exe --workdir ""C:\Program Files\IdentBitrix24""" -ForegroundColor White
 Write-Host ""
 Exit-Build 0

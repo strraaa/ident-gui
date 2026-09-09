@@ -23,6 +23,8 @@ MANIFEST
 
 # PyInstaller
 *.spec
+# ...кроме описания сборки приложения: без него build_gui_exe.ps1 не работает
+!ident_settings.spec
 
 # Virtual environments
 venv/
@@ -61,3 +63,7 @@ Thumbs.db
 
 # Local dependency cache
 .reqs/
+
+# Макеты: в репозитории живут генератор и раскладка, а не то, что они породили
+design/*.dc.html
+design/nastroyki-ident-b24.html
