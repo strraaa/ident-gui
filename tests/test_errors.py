@@ -6,6 +6,7 @@
 до общего таймаута, ничего не сообщая о причине.
 """
 
+import io
 import sys
 import threading
 import unittest
@@ -46,11 +47,14 @@ class ErrorHandlerTests(unittest.TestCase):
     def test_dialog_is_skipped_when_disabled(self):
         """Самопроверка: ошибка в журнал и в stderr, окно не показывается"""
         errors.install(dialogs=False)
+        stderr = io.StringIO()
 
-        with mock.patch.object(errors, '_show_dialog') as dialog:
+        with mock.patch.object(errors, '_show_dialog') as dialog, \
+                mock.patch.object(sys, 'stderr', stderr):
             errors.handle_exception(*self._failure())
 
         dialog.assert_not_called()
+        self.assertIn('поломка', stderr.getvalue())
         self.assertEqual(errors.count(), 1)
 
     def test_dialog_is_shown_by_default(self):
