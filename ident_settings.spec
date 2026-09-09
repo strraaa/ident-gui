@@ -20,6 +20,15 @@ import re
 import sys
 from pathlib import Path
 
+# Сборка идёт из-под CI, где вывод уходит в конвейер: Python берёт кодировку
+# системы (на раннере GitHub — cp1252), и печать строки с кириллицей роняет
+# сборку через UnicodeEncodeError. Переводим потоки спеки на UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError, ValueError):
+        pass
+
 ROOT = Path(SPECPATH)
 sys.path.insert(0, str(ROOT))
 

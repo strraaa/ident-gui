@@ -14,6 +14,7 @@
 """
 
 import argparse
+import faulthandler
 import sys
 import tempfile
 from pathlib import Path
@@ -31,6 +32,9 @@ LOCK_NAME = 'ident-settings.lock'
 
 #: через сколько считать блокировку брошенной, мс
 STALE_LOCK_MS = 30_000
+
+#: сколько ждать самопроверку, с — дольше окно не строится ни на одной машине
+SELFTEST_TIMEOUT_S = 120
 
 
 def parse_args(argv):
@@ -72,7 +76,9 @@ def main(argv=None) -> int:
     from gui.services.app_settings import AppSettings
     from gui.theme import apply_theme
 
-    errors.install()
+    # В самопроверке окна показывать некому: модальное сообщение об ошибке
+    # остановит сборочную машину до общего таймаута прогона
+    errors.install(dialogs=not args.selftest)
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
@@ -154,13 +160,20 @@ def _selftest(app, apply_theme, log) -> int:
     вычищения лишних библиотек Qt приложение может перестать находить плагин
     платформы или стиля, и узнать об этом лучше на сборочной машине, чем
     у заказчика. Запускается с `QT_QPA_PLATFORM=offscreen`.
+
+    Проверка идёт под сторожевым таймером: всё, что ждёт ответа (окно
+    с вопросом, обращение к планировщику, сеть), на сборочной машине ждало
+    бы вечно. По истечении срока процесс печатает стек всех потоков —
+    по нему видно, где именно встали — и завершается с ненулевым кодом.
     """
     from PySide6.QtCore import QSettings
 
     from gui.main_window import MainWindow
+    from gui.services import errors
     from gui.services.app_settings import AppSettings
 
     log.info('Самопроверка сборки')
+    faulthandler.dump_traceback_later(SELFTEST_TIMEOUT_S, exit=True)
 
     with tempfile.TemporaryDirectory() as tmp:
         apply_theme(app, 'light')
@@ -172,6 +185,16 @@ def _selftest(app, apply_theme, log) -> int:
 
         pages = len(window.pages)
         window.close()
+
+    faulthandler.cancel_dump_traceback_later()
+
+    # Перехваченная ошибка не роняет приложение — окно строится дальше, и без
+    # этой проверки самопроверка отчиталась бы об успехе на сломанной сборке
+    failures = errors.count()
+    if failures:
+        log.error('Самопроверка не пройдена, ошибок: %s', failures)
+        print(f'Самопроверка не пройдена: ошибок {failures}')
+        return 1
 
     log.info('Самопроверка пройдена, страниц собрано: %s', pages)
     print(f'Самопроверка пройдена: страниц собрано {pages}')

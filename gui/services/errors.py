@@ -12,10 +12,16 @@
 Диалог показывается не больше трёх раз за запуск. Если ошибка приходит из
 таймера обновления состояния, она повторяется каждые десять секунд, и окно
 с сообщением превращается в ловушку, из которой не выбраться.
+
+Там, где окно закрыть некому (самопроверка сборки на сборочной машине),
+диалоги выключаются: модальное окно останавливает выполнение навсегда,
+и прогон висит до общего таймаута, ничего не сообщая. Тогда трассировка
+идёт в stderr, а число ошибок можно спросить через `count()`.
 """
 
 import sys
 import threading
+import traceback
 
 from .logging_setup import log_path, logger
 
@@ -23,21 +29,44 @@ from .logging_setup import log_path, logger
 MAX_DIALOGS = 3
 
 _shown = 0
+_count = 0
+_dialogs = True
 
 
-def install() -> None:
-    """Ставит перехватчики для главного потока и для фоновых"""
+def install(dialogs: bool = True) -> None:
+    """
+    Ставит перехватчики для главного потока и для фоновых.
+
+    `dialogs=False` — режим без человека за экраном: ошибка пишется
+    в журнал и в stderr, но окном никого не останавливает.
+    """
+    global _dialogs
+    _dialogs = dialogs
+
     sys.excepthook = handle_exception
     threading.excepthook = _handle_thread_exception
 
 
+def count() -> int:
+    """Сколько необработанных ошибок перехвачено с начала запуска"""
+    return _count
+
+
 def handle_exception(exc_type, exc, tb) -> None:
     """Ошибка в главном потоке: в журнал и в окно"""
+    global _count
+
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc, tb)
         return
 
+    _count += 1
     logger('ошибки').critical('Необработанная ошибка', exc_info=(exc_type, exc, tb))
+
+    if not _dialogs:
+        traceback.print_exception(exc_type, exc, tb, file=sys.stderr)
+        return
+
     _show_dialog(exc_type, exc)
 
 
@@ -48,8 +77,12 @@ def _handle_thread_exception(args) -> None:
     Показывать окно отсюда нельзя — обращаться к интерфейсу из чужого потока
     Qt не разрешает, и попытка кончится падением уже настоящим.
     """
+    global _count
+
     if issubclass(args.exc_type, SystemExit):
         return
+
+    _count += 1
 
     logger('ошибки').critical(
         'Необработанная ошибка в фоновом потоке %s',
