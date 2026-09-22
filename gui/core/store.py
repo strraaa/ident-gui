@@ -24,8 +24,8 @@ from . import schema, validation
 from .ini_document import IniDocument
 from .types import Secret
 
-#: сколько резервных копий конфигурации хранить
-BACKUP_LIMIT = 10
+#: сколько последних резервных копий конфигурации хранить
+BACKUP_LIMIT = 3
 
 SECRET_PREFIX = 'DPAPI:'
 
@@ -265,7 +265,7 @@ class SettingsStore:
         if not path.exists() or limit <= 0:
             return None
 
-        stamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+        stamp = datetime.now().strftime('%Y-%m-%d_%H%M%S_%f')
         backup = path.with_name(f'{path.name}.{stamp}.bak')
 
         backup.write_bytes(path.read_bytes())

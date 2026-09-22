@@ -300,6 +300,20 @@ class SaveTests(unittest.TestCase):
             backups = list(path.parent.glob('config.ini.*.bak'))
             self.assertLessEqual(len(backups), 2)
 
+    def test_default_backup_rotation_keeps_three_latest_copies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.ini'
+            path.write_text(CONFIG, encoding='utf-8', newline='')
+
+            for index in range(5):
+                store = SettingsStore.load(path)
+                store.set_value('Sync', 'interval_minutes', index + 3)
+                store.save(path)
+
+            backups = sorted(path.parent.glob('config.ini.*.bak'))
+            self.assertEqual(len(backups), 3)
+            self.assertEqual(len({backup.name for backup in backups}), 3)
+
     def test_store_is_clean_after_save(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'config.ini'
