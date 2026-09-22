@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QMessageBox, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout
 )
+from gui.widgets.inputs import NoWheelComboBox
 
 from gui.services.config_service import ConfigService
 from gui.services.queue_service import (
@@ -66,7 +67,7 @@ class QueuePage(Page):
         # Панель фильтров
         filters = QHBoxLayout()
 
-        self.cmb_filter = QComboBox()
+        self.cmb_filter = NoWheelComboBox()
         for title, _ in FILTERS:
             self.cmb_filter.addItem(title)
         self.cmb_filter.currentIndexChanged.connect(self._apply_filters)

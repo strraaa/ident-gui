@@ -40,11 +40,24 @@ jobs:
           Compress-Archive -Path dist\ident_settings -DestinationPath $zip
           "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Create checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash $env:ZIP -Algorithm SHA256).Hash.ToLower()
+          "$hash  $env:ZIP" | Out-File SHA256SUMS.txt -Encoding ascii
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ident_settings_win64
           path: ${{ env.ZIP }}
+          retention-days: 90
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ident_settings_checksums
+          path: SHA256SUMS.txt
           retention-days: 90
 
       - name: Publish release
@@ -64,8 +77,8 @@ jobs:
           }
           $global:LASTEXITCODE = 0
           if ($exists) {
-              gh release upload $env:GITHUB_REF_NAME $env:ZIP --clobber
+              gh release upload $env:GITHUB_REF_NAME $env:ZIP SHA256SUMS.txt --clobber
           } else {
-              gh release create $env:GITHUB_REF_NAME $env:ZIP --title "ident-gui $version" @notes
+              gh release create $env:GITHUB_REF_NAME $env:ZIP SHA256SUMS.txt --title "ident-gui $version" @notes
           }
           if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -30,10 +30,13 @@ from gui.pages.status import StatusPage
 from gui.pages.sync import SyncPage
 from gui.services.app_settings import AppSettings
 from gui.services.config_service import ConfigService
+from gui.services import logging_setup, updater
 from gui.services.paths import Workspace
 from gui.services.task_service import TaskService
+from gui.services.workers import WorkerRunner
 from gui.theme import apply_theme, set_tone, tokens
 from gui.widgets import Banner, NavList
+from gui.widgets.update_dialog import UpdateDialog
 
 WINDOW_TITLE = 'Настройки интеграции Ident → Битрикс24'
 
@@ -42,14 +45,6 @@ LIST_LIMIT = 12
 
 #: задержка между правкой поля и пересчётом состояния, мс
 EDIT_DEBOUNCE_MS = 200
-
-THEME_ORDER = ('system', 'light', 'dark')
-
-THEME_TITLES = {
-    'system': 'Тема: как в системе',
-    'light': 'Тема: светлая',
-    'dark': 'Тема: тёмная',
-}
 
 
 class MainWindow(QMainWindow):
@@ -62,6 +57,8 @@ class MainWindow(QMainWindow):
         self.config = ConfigService(workspace)
         self.task_service = TaskService()
         self.app_settings = app_settings or AppSettings()
+        self._runner = WorkerRunner()
+        self._update_checked = False
 
         self.setWindowTitle(WINDOW_TITLE)
         self.setMinimumSize(tokens.WINDOW_MIN_WIDTH, tokens.WINDOW_MIN_HEIGHT)
@@ -69,6 +66,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._restore_window()
         self._load_workspace()
+        QTimer.singleShot(1200, self._check_updates_silently)
 
     # ------------------------------------------------------------------
     # Сборка
@@ -181,15 +179,14 @@ class MainWindow(QMainWindow):
         btn_change.setToolTip('Открыть настройки службы из другой папки')
         btn_change.clicked.connect(self._on_change_workdir)
 
-        self.btn_theme = QPushButton()
-        self.btn_theme.setProperty('variant', 'quiet')
-        self.btn_theme.clicked.connect(self._on_toggle_theme)
-        self._update_theme_button()
+        self.btn_updates = QPushButton('Проверить обновления')
+        self.btn_updates.setProperty('variant', 'quiet')
+        self.btn_updates.clicked.connect(self._open_updates)
 
         header.addWidget(caption)
         header.addWidget(self.lbl_workdir, stretch=1)
         header.addWidget(btn_change)
-        header.addWidget(self.btn_theme)
+        header.addWidget(self.btn_updates)
 
         return header
 
@@ -301,22 +298,33 @@ class MainWindow(QMainWindow):
         index = self.stack.currentIndex()
         return self.pages[index] if 0 <= index < len(self.pages) else None
 
-    def _on_toggle_theme(self):
-        """Как в системе → светлая → тёмная → снова как в системе"""
-        current = self.app_settings.theme()
-        following = THEME_ORDER[(THEME_ORDER.index(current) + 1) % len(THEME_ORDER)]
+    def _open_updates(self):
+        UpdateDialog(self).exec()
 
-        self.app_settings.set_theme(following)
+    def _check_updates_silently(self):
+        if self._update_checked:
+            return
+        self._update_checked = True
+        self._runner.run(
+            updater.check,
+            self._updates_checked,
+            self._updates_check_failed,
+        )
 
-        app = QApplication.instance()
-        if app is not None:
-            apply_theme(app, following)
+    def _updates_checked(self, info):
+        if info is None:
+            return
+        self.banner.show_message(
+            f'Доступно обновление {info.version}.',
+            tone='accent',
+            action_text='Обновить',
+            action=self._open_updates,
+        )
 
-        self._update_theme_button()
-
-    def _update_theme_button(self):
-        self.btn_theme.setText(THEME_TITLES[self.app_settings.theme()])
-        self.btn_theme.setToolTip('Переключить оформление приложения')
+    def _updates_check_failed(self, message: str):
+        # Фоновая автоматическая проверка не должна мешать работе приложения.
+        log = logging_setup.logger('обновление')
+        log.warning(message)
 
     # ------------------------------------------------------------------
     # Действия

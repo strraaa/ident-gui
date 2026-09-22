@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel,
     QMessageBox, QPushButton, QTableWidget, QVBoxLayout
 )
+from gui.widgets.inputs import NoWheelComboBox
 
 from gui.services.b24_service import B24Service
 from gui.services.config_service import ConfigService
@@ -155,7 +156,7 @@ class FieldsPage(Page):
                 title_item.setFont(font)
             self.table.setItem(index, 1, title_item)
 
-            editor = QComboBox()
+            editor = NoWheelComboBox()
             editor.setEditable(True)
             editor.setInsertPolicy(QComboBox.NoInsert)
             editor.lineEdit().setPlaceholderText('UF_CRM_… или пусто, если поле не используется')

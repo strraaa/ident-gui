@@ -258,9 +258,10 @@ def verify(archive: Path, info: UpdateInfo) -> None:
     предупреждение в журнал, чтобы это было видно при разборе жалобы.
     """
     if not info.checksum:
-        log.warning('Релиз %s не публикует %s — целостность архива не проверена',
-                     info.version, SUMS_ASSET_NAME)
-        return
+        raise UpdateError(
+            f'Релиз {info.version} не публикует {SUMS_ASSET_NAME}; '
+            'установка без проверки целостности запрещена.'
+        )
 
     digest = hashlib.sha256()
     with open(archive, 'rb') as f:
@@ -358,7 +359,12 @@ def _extract(archive: Path, dest: Path) -> Path:
     а не содержимое zip как есть, иначе внутри install_dir появится лишний
     уровень вложенности.
     """
+    dest = Path(dest).resolve()
     with zipfile.ZipFile(archive) as zf:
+        for member in zf.infolist():
+            target = (dest / member.filename).resolve()
+            if target != dest and dest not in target.parents:
+                raise UpdateError('Архив обновления содержит небезопасный путь')
         zf.extractall(dest)
 
     entries = [p for p in dest.iterdir() if p.is_dir()]

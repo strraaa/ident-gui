@@ -2,7 +2,7 @@
 
 [![Release](https://img.shields.io/badge/build-GitHub%20Actions-blue)](https://github.com/ms123131/ident-gui/actions/workflows/release.yml)
 [![Tests](https://img.shields.io/badge/tests-unittest-blue)](https://github.com/ms123131/ident-gui/actions/workflows/tests.yml)
-[![Release](https://img.shields.io/badge/release-0.0.2-green)](https://github.com/ms123131/ident-gui/releases)
+[![Release](https://img.shields.io/badge/release-0.0.3-green)](https://github.com/strraaa/ident-gui/releases)
 [![License](https://img.shields.io/badge/license-proprietary-lightgrey)](#лицензия)
 
 Десктопное приложение (PySide6) для настройки и обслуживания синхронизатора Ident → Битрикс24. Служба синхронизации и приложение — два отдельных процесса, работающих
@@ -35,9 +35,8 @@ Copy-Item -Recurse dist\ident_settings "C:\Program Files\IdentBitrix24\settings"
 ident_settings.exe --workdir "D:\IdentBitrix24"
 ```
 
-Выбранная папка, размер окна, открытый раздел и оформление запоминаются — при следующем запуске
-ключ не нужен. Оформление берётся из системной темы Windows; переключить его можно кнопкой в шапке
-окна или ключом `--theme light|dark|system`.
+Выбранная папка, размер окна и открытый раздел запоминаются — при следующем запуске ключ не нужен.
+Приложение использует единую тёмную тему; ключ `--theme dark` оставлен для совместимости.
 
 ## Документация
 
@@ -104,7 +103,7 @@ ident_settings.exe --workdir "D:\IdentBitrix24"
 
 | Модуль | За что отвечает |
 |---|---|
-| `theme/tokens.py` | палитра светлой и тёмной темы, отступы и радиусы |
+| `theme/tokens.py` | тёмная палитра, отступы и радиусы |
 | `theme/stylesheet.py` | сборка QSS и QPalette, пометка элементов смыслом (`set_tone`) |
 | `widgets/` | полоса сообщения вместо модального окна, отметка состояния, боковое меню |
 | `pages/` | страницы разделов |
@@ -141,6 +140,17 @@ ident_settings.exe --selftest          # из сборки
 
 Журнал приложения — `%LOCALAPPDATA%\IdentSettings\ident_settings.log`. В папку службы приложение
 не пишет: там журнал держит её собственный процесс.
+
+## Обновление приложения
+
+После открытия GUI автоматически проверяет последний стабильный релиз GitHub. При наличии новой
+версии появляется полоса с кнопкой «Обновить». В разделе «Проверить обновления» можно вручную
+запустить проверку, увидеть release notes и подтвердить перезапуск.
+
+Перед установкой приложение скачивает архив во временную папку, проверяет SHA-256 из
+`SHA256SUMS.txt`, отклоняет небезопасные пути в ZIP, запускает `--selftest`, а при ошибке
+восстанавливает предыдущую установку. Релизы без опубликованной контрольной суммы не
+устанавливаются.
 
 ## Ограничения
 

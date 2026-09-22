@@ -115,7 +115,7 @@ class CheckTests(unittest.TestCase):
             updater.check()
 
     @patch('gui.services.updater.requests.get')
-    def test_missing_checksum_file_does_not_block_update(self, mock_get):
+    def test_missing_checksum_file_is_reported(self, mock_get):
         release_response = self._response({
             'tag_name': 'v9.9.9',
             'assets': [
@@ -194,13 +194,14 @@ class DownloadAndVerifyTests(unittest.TestCase):
             updater.verify(archive, info)
         self.assertFalse(archive.exists())  # подозрительный файл не остаётся на диске
 
-    def test_verify_skips_when_no_checksum_published(self):
+    def test_verify_rejects_when_no_checksum_published(self):
         archive = self.tmp / 'app.zip'
         archive.write_bytes(b'hello world')
         info = updater.UpdateInfo(version='9.9.9', notes='', download_url='',
                                    asset_name='app.zip', checksum=None)
 
-        updater.verify(archive, info)
+        with self.assertRaises(updater.UpdateError):
+            updater.verify(archive, info)
         self.assertTrue(archive.exists())
 
 
@@ -265,6 +266,16 @@ class InstallTests(unittest.TestCase):
 
         with self.assertRaises(updater.UpdateError):
             updater.install(archive, install_dir=None, run_selftest=lambda exe: None)
+
+    def test_extract_rejects_path_traversal(self):
+        archive = self.root / 'unsafe.zip'
+        with zipfile.ZipFile(archive, 'w') as zf:
+            zf.writestr('../outside.txt', 'не должно появиться')
+
+        with self.assertRaises(updater.UpdateError):
+            updater._extract(archive, self.root / 'extract')
+
+        self.assertFalse((self.root / 'outside.txt').exists())
 
 
 if __name__ == '__main__':

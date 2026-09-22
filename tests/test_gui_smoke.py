@@ -287,17 +287,10 @@ class MainWindowSmokeTests(unittest.TestCase):
 
             window.close()
 
-    def test_theme_switches_in_a_cycle(self):
-        self.assertEqual(self.app_settings.theme(), 'system')
-
-        self.window._on_toggle_theme()
-        self.assertEqual(self.app_settings.theme(), 'light')
-
-        self.window._on_toggle_theme()
+    def test_application_uses_dark_theme_only(self):
         self.assertEqual(self.app_settings.theme(), 'dark')
-
-        self.window._on_toggle_theme()
-        self.assertEqual(self.app_settings.theme(), 'system')
+        self.app_settings.set_theme('light')
+        self.assertEqual(self.app_settings.theme(), 'dark')
 
     def test_window_geometry_is_remembered(self):
         self.window.resize(1000, 700)
@@ -308,41 +301,32 @@ class MainWindowSmokeTests(unittest.TestCase):
 
 @unittest.skipIf(QApplication is None, 'PySide6 не установлен')
 class ThemeTests(unittest.TestCase):
-    """Оформление собирается для обеих тем"""
+    """Оформление приложения собирается для тёмной темы"""
 
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_both_palettes_define_the_same_names(self):
-        from gui.theme.tokens import DARK, LIGHT
-
-        self.assertEqual(set(LIGHT.as_dict()), set(DARK.as_dict()))
-
     def test_every_colour_is_a_hex_value(self):
-        from gui.theme.tokens import DARK, LIGHT
+        from gui.theme.tokens import DARK
 
-        for palette in (LIGHT, DARK):
-            for name, value in palette.as_dict().items():
-                self.assertRegex(value, r'^#[0-9A-Fa-f]{6}$', f'{palette.name}.{name}')
+        for name, value in DARK.as_dict().items():
+            self.assertRegex(value, r'^#[0-9A-Fa-f]{6}$', f'{DARK.name}.{name}')
 
-    def test_stylesheet_uses_the_palette_it_was_given(self):
+    def test_stylesheet_uses_the_dark_palette(self):
         from gui.theme.stylesheet import build_stylesheet
-        from gui.theme.tokens import DARK, LIGHT
+        from gui.theme.tokens import DARK
 
-        light = build_stylesheet(LIGHT)
         dark = build_stylesheet(DARK)
 
-        self.assertIn(LIGHT.accent, light)
         self.assertIn(DARK.accent, dark)
-        self.assertNotIn(DARK.background, light)
 
     def test_apply_theme_returns_the_applied_name(self):
         from gui.theme import apply_theme
 
         self.assertEqual(apply_theme(self.app, 'dark'), 'dark')
-        self.assertEqual(apply_theme(self.app, 'light'), 'light')
-        self.assertIn(apply_theme(self.app, 'system'), ('light', 'dark'))
+        self.assertEqual(apply_theme(self.app, 'light'), 'dark')
+        self.assertEqual(apply_theme(self.app, 'system'), 'dark')
 
 
 if __name__ == '__main__':

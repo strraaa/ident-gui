@@ -7,8 +7,7 @@
 системной теме Windows виджеты темнели, а зашитые светлые цвета оставались
 и текст сливался с фоном.
 
-Здесь два набора значений с одинаковыми именами. Всё остальное приложение
-обращается только к именам: `tokens.DANGER`, а не `#b42318`.
+Всё приложение обращается к смысловым именам палитры, а не к hex-цветам.
 
 Именование смысловое, а не описательное: `WARNING`, а не `ORANGE`. Оттенок
 можно поменять, смысл — нет.
@@ -20,7 +19,7 @@ from typing import Dict
 
 @dataclass(frozen=True)
 class Palette:
-    """Один набор цветов — светлый или тёмный"""
+    """Единый набор цветов приложения."""
 
     name: str
 
@@ -59,52 +58,24 @@ class Palette:
         }
 
 
-LIGHT = Palette(
-    name='light',
-
-    background='#F4F6F8',
-    surface='#FFFFFF',
-    surface_alt='#EDF0F4',
-    surface_hover='#E4E9EF',
-
-    border='#D5DAE1',
-    border_strong='#B9C1CB',
-
-    text='#16202B',
-    text_muted='#5C6673',
-    text_on_accent='#FFFFFF',
-
-    accent='#2C5AA0',
-    accent_hover='#24497F',
-    accent_soft='#E3EAF6',
-
-    success='#1A7F37',
-    success_soft='#E6F4EA',
-    warning='#A04100',
-    warning_soft='#FAEEE4',
-    danger='#B42318',
-    danger_soft='#FBEAE8',
-)
-
-
 DARK = Palette(
     name='dark',
 
-    background='#11161D',
-    surface='#1A212B',
-    surface_alt='#222B36',
-    surface_hover='#2A3541',
+    background='#0F131A',
+    surface='#151A22',
+    surface_alt='#11161D',
+    surface_hover='#202936',
 
-    border='#2E3945',
-    border_strong='#3D4956',
+    border='#2A3340',
+    border_strong='#3B4656',
 
-    text='#E3E8EE',
-    text_muted='#97A1AD',
-    text_on_accent='#0E141B',
+    text='#E7ECF4',
+    text_muted='#9AA7B8',
+    text_on_accent='#07101F',
 
-    accent='#7FA8E2',
-    accent_hover='#9BBCEA',
-    accent_soft='#1E2A3A',
+    accent='#5B9BFF',
+    accent_hover='#78ACFF',
+    accent_soft='#172A47',
 
     success='#4FAF6E',
     success_soft='#17281D',
@@ -115,7 +86,7 @@ DARK = Palette(
 )
 
 
-PALETTES = {'light': LIGHT, 'dark': DARK}
+PALETTES = {'dark': DARK}
 
 
 # ----------------------------------------------------------------------
@@ -135,7 +106,8 @@ FONT_SIZE_SMALL = 12
 FONT_SIZE_TITLE = 15
 
 #: ширина бокового меню
-NAV_WIDTH = 208
+NAV_COLLAPSED_WIDTH = 56
+NAV_EXPANDED_WIDTH = 220
 
 #: минимальный размер окна — ниже формы начинают резаться
 WINDOW_MIN_WIDTH = 960
@@ -143,5 +115,5 @@ WINDOW_MIN_HEIGHT = 620
 
 
 def palette(name: str) -> Palette:
-    """Набор цветов по имени. Незнакомое имя даёт светлую тему."""
-    return PALETTES.get(name, LIGHT)
+    """Возвращает единственную палитру приложения."""
+    return DARK

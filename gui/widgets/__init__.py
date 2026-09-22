@@ -10,3 +10,9 @@ from .banner import Banner
 from .nav import NavList
 
 __all__ = ['Badge', 'Banner', 'NavList']
+from .inputs import NoWheelComboBox, NoWheelDoubleSpinBox, NoWheelSpinBox
+
+__all__ = [
+    'Badge', 'Banner', 'NavList',
+    'NoWheelComboBox', 'NoWheelDoubleSpinBox', 'NoWheelSpinBox',
+]
