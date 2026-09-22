@@ -23,7 +23,7 @@ KEY_WORKDIR = 'workspace/workdir'
 KEY_PAGE = 'window/page'
 KEY_THEME = 'appearance/theme'
 
-THEME_MODES = ('system', 'light', 'dark')
+THEME_MODES = ('dark',)
 
 
 class AppSettings:
@@ -68,12 +68,11 @@ class AppSettings:
     # ------------------------------------------------------------------
 
     def theme(self) -> str:
-        """system, light или dark"""
-        value = str(self._settings.value(KEY_THEME) or 'system')
-        return value if value in THEME_MODES else 'system'
+        """Единственная поддерживаемая тема приложения."""
+        return 'dark'
 
     def set_theme(self, mode: str) -> None:
-        self._settings.setValue(KEY_THEME, mode if mode in THEME_MODES else 'system')
+        self._settings.setValue(KEY_THEME, 'dark')
 
     # ------------------------------------------------------------------
 

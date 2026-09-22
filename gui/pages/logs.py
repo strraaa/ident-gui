@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout
 )
+from gui.widgets.inputs import NoWheelComboBox, NoWheelSpinBox
 
 from gui.services.config_service import ConfigService
 from gui.pages.page import Page, Section
@@ -53,11 +54,11 @@ class LogsPage(Page):
         # Панель управления
         controls = QHBoxLayout()
 
-        self.cmb_file = QComboBox()
+        self.cmb_file = NoWheelComboBox()
         self.cmb_file.setMinimumWidth(260)
         self.cmb_file.currentIndexChanged.connect(self._on_file_changed)
 
-        self.spin_lines = QSpinBox()
+        self.spin_lines = NoWheelSpinBox()
         self.spin_lines.setRange(50, 5000)
         self.spin_lines.setSingleStep(50)
         self.spin_lines.setValue(300)

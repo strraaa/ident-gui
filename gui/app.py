@@ -45,9 +45,8 @@ def parse_args(argv):
     )
     parser.add_argument(
         '--theme',
-        choices=('system', 'light', 'dark'),
-        help='Оформление: system (как в системе), light или dark. '
-             'Без ключа берётся то, что выбрано в прошлый раз.'
+        choices=('dark',),
+        help='Оформление приложения: dark.'
     )
     parser.add_argument(
         '--selftest',
@@ -176,7 +175,7 @@ def _selftest(app, apply_theme, log) -> int:
     faulthandler.dump_traceback_later(SELFTEST_TIMEOUT_S, exit=True)
 
     with tempfile.TemporaryDirectory() as tmp:
-        apply_theme(app, 'light')
+        apply_theme(app, 'dark')
 
         settings = AppSettings(QSettings(str(Path(tmp) / 'selftest.ini'), QSettings.IniFormat))
         window = MainWindow(Workspace(Path(tmp)), settings)

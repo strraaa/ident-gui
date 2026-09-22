@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QGroupBox, QLabel, QLineEdit,
     QSpinBox, QVBoxLayout
 )
+from gui.widgets.inputs import NoWheelComboBox, NoWheelSpinBox
 
 from gui.services.config_service import ConfigService
 from gui.pages.page import Page, Section
@@ -62,14 +63,14 @@ class SyncPage(Page):
         form = QFormLayout()
         outer.addLayout(form)
 
-        self.spin_interval = QSpinBox()
+        self.spin_interval = NoWheelSpinBox()
         self.spin_interval.setRange(1, 1440)
         self.spin_interval.setSuffix(' мин')
 
-        self.spin_batch = QSpinBox()
+        self.spin_batch = NoWheelSpinBox()
         self.spin_batch.setRange(1, 1000)
 
-        self.spin_initial_days = QSpinBox()
+        self.spin_initial_days = NoWheelSpinBox()
         self.spin_initial_days.setRange(1, 3650)
         self.spin_initial_days.setSuffix(' дн')
 
@@ -93,13 +94,13 @@ class SyncPage(Page):
         form = QFormLayout()
         outer.addLayout(form)
 
-        self.spin_filial_id = QSpinBox()
+        self.spin_filial_id = NoWheelSpinBox()
         self.spin_filial_id.setRange(1, 10)
 
         self.txt_enabled_filials = QLineEdit()
         self.txt_enabled_filials.setPlaceholderText('например, 4, 5 — пусто означает «все филиалы»')
 
-        self.spin_default_filial = QSpinBox()
+        self.spin_default_filial = NoWheelSpinBox()
         self.spin_default_filial.setRange(0, 10)
 
         form.addRow('ID филиала по умолчанию:', self.spin_filial_id)
@@ -122,16 +123,16 @@ class SyncPage(Page):
 
         self.chk_queue_enabled = QCheckBox('Использовать очередь при ошибках отправки')
 
-        self.spin_max_attempts = QSpinBox()
+        self.spin_max_attempts = NoWheelSpinBox()
         self.spin_max_attempts.setRange(1, 20)
         self.spin_max_attempts.valueChanged.connect(self._update_retry_window)
 
-        self.spin_retry_interval = QSpinBox()
+        self.spin_retry_interval = NoWheelSpinBox()
         self.spin_retry_interval.setRange(1, 600)
         self.spin_retry_interval.setSuffix(' мин')
         self.spin_retry_interval.valueChanged.connect(self._update_retry_window)
 
-        self.spin_queue_size = QSpinBox()
+        self.spin_queue_size = NoWheelSpinBox()
         self.spin_queue_size.setRange(10, 100000)
 
         # Однострочные: в QFormLayout перенос по словам ломает расчёт высоты
@@ -158,18 +159,18 @@ class SyncPage(Page):
         form = QFormLayout()
         outer.addLayout(form)
 
-        self.cmb_log_level = QComboBox()
+        self.cmb_log_level = NoWheelComboBox()
         self.cmb_log_level.addItems(LOG_LEVELS)
 
-        self.spin_rotation_days = QSpinBox()
+        self.spin_rotation_days = NoWheelSpinBox()
         self.spin_rotation_days.setRange(1, 365)
         self.spin_rotation_days.setSuffix(' дн')
 
-        self.spin_log_size = QSpinBox()
+        self.spin_log_size = NoWheelSpinBox()
         self.spin_log_size.setRange(1, 1000)
         self.spin_log_size.setSuffix(' МБ')
 
-        self.spin_log_backups = QSpinBox()
+        self.spin_log_backups = NoWheelSpinBox()
         self.spin_log_backups.setRange(1, 100)
 
         self.chk_mask_personal = QCheckBox('Маскировать персональные данные в журнале')

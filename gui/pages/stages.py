@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout
 )
+from gui.widgets.inputs import NoWheelComboBox
 
 from gui.services.b24_service import B24Service
 from gui.services.config_service import ConfigService
@@ -66,7 +67,7 @@ class StagesPage(Page):
         # Воронка
         top = QHBoxLayout()
 
-        self.cmb_category = QComboBox()
+        self.cmb_category = NoWheelComboBox()
         self.cmb_category.setEditable(True)
         self.cmb_category.setMinimumWidth(220)
 
@@ -117,7 +118,7 @@ class StagesPage(Page):
         btn_remove = QPushButton('Удалить выбранный')
         btn_remove.clicked.connect(self._remove_selected_row)
 
-        self.cmb_default_stage = QComboBox()
+        self.cmb_default_stage = NoWheelComboBox()
         self.cmb_default_stage.setEditable(True)
         self.cmb_default_stage.setMinimumWidth(200)
 
@@ -263,13 +264,13 @@ class StagesPage(Page):
         row = self.table.rowCount()
         self.table.insertRow(row)
 
-        status_editor = QComboBox()
+        status_editor = NoWheelComboBox()
         status_editor.setEditable(True)
         status_editor.addItems(KNOWN_IDENT_STATUSES)
         status_editor.setCurrentText(status)
         self.table.setCellWidget(row, 0, status_editor)
 
-        stage_editor = QComboBox()
+        stage_editor = NoWheelComboBox()
         stage_editor.setEditable(True)
         self._fill_stage_combo(stage_editor)
         self._set_combo_value(stage_editor, stage)

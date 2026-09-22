@@ -183,28 +183,41 @@ QHeaderView::section {{
 /* ---------- боковое меню ---------- */
 
 QListWidget#nav {{
-    background: {p.surface_alt};
+    background: transparent;
     border: none;
-    border-right: 1px solid {p.border};
     border-radius: 0;
     outline: none;
-    padding: {tokens.GAP}px 0;
+    padding: {tokens.GAP_SMALL}px 0;
 }}
 
 QListWidget#nav::item {{
-    padding: 7px {tokens.GAP_LARGE}px;
+    padding: 8px {tokens.GAP}px;
     border: none;
     color: {p.text};
+    border-radius: {tokens.RADIUS}px;
 }}
 
 QListWidget#nav::item:selected {{
     background: {p.accent_soft};
     color: {p.accent};
     font-weight: 600;
+    border: 1px solid {p.accent};
 }}
 
 QListWidget#nav::item:hover:!selected {{
     background: {p.surface_hover};
+}}
+
+QWidget#navigationView {{
+    background: {p.surface_alt};
+    border-right: 1px solid {p.border};
+}}
+
+QPushButton#navigationToggle {{
+    min-width: 36px;
+    max-width: 36px;
+    padding: 4px;
+    font-size: 17px;
 }}
 
 QLabel[role="nav-group"] {{
@@ -327,29 +340,28 @@ def detect_scheme(app: Optional[QApplication] = None) -> str:
     """
     Тема, выбранная в системе.
 
-    Qt 6.5 и новее сообщает её напрямую; на более старых сборках остаёмся
-    на светлой — она безопаснее для приложения, которым пользуются на сервере.
+    Тема приложения фиксирована: интерфейс оптимизирован для тёмного режима.
     """
     app = app or QApplication.instance()
     if app is None:
-        return 'light'
+        return 'dark'
 
     try:
         scheme = app.styleHints().colorScheme()
     except AttributeError:
-        return 'light'
+        return 'dark'
 
-    return 'dark' if scheme == Qt.ColorScheme.Dark else 'light'
+    return 'dark'
 
 
 def apply_theme(app: QApplication, mode: str = 'system') -> str:
     """
     Применяет оформление. Возвращает имя применённой темы.
 
-    `mode` — 'system', 'light' или 'dark'.
+    `mode` сохраняется для совместимости, но применяется только dark.
     """
-    name = detect_scheme(app) if mode == 'system' else mode
-    p = tokens.palette(name)
+    name = 'dark'
+    p = tokens.DARK
 
     app.setStyle('Fusion')
     app.setPalette(build_palette(p))

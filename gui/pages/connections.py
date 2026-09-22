@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QPushButton, QSpinBox, QVBoxLayout
 )
+from gui.widgets.inputs import NoWheelSpinBox
 
 from gui.services.b24_service import B24Service, DatabaseService
 from gui.services.config_service import ConfigService
@@ -58,7 +59,7 @@ class ConnectionsPage(Page):
         self.txt_db_server = QLineEdit()
         self.txt_db_server.setPlaceholderText('например, SERVER\\SQLEXPRESS или 192.168.1.10')
 
-        self.spin_db_port = QSpinBox()
+        self.spin_db_port = NoWheelSpinBox()
         self.spin_db_port.setRange(1, 65535)
 
         self.txt_db_name = QLineEdit()
@@ -71,11 +72,11 @@ class ConnectionsPage(Page):
         self.lbl_db_password_state.setWordWrap(True)
         set_tone(self.lbl_db_password_state, 'muted')
 
-        self.spin_db_conn_timeout = QSpinBox()
+        self.spin_db_conn_timeout = NoWheelSpinBox()
         self.spin_db_conn_timeout.setRange(1, 600)
         self.spin_db_conn_timeout.setSuffix(' с')
 
-        self.spin_db_query_timeout = QSpinBox()
+        self.spin_db_query_timeout = NoWheelSpinBox()
         self.spin_db_query_timeout.setRange(1, 3600)
         self.spin_db_query_timeout.setSuffix(' с')
 
@@ -123,14 +124,14 @@ class ConnectionsPage(Page):
         self.btn_show_webhook.toggled.connect(self._on_toggle_webhook_visibility)
         webhook_row.addWidget(self.btn_show_webhook)
 
-        self.spin_b24_timeout = QSpinBox()
+        self.spin_b24_timeout = NoWheelSpinBox()
         self.spin_b24_timeout.setRange(1, 600)
         self.spin_b24_timeout.setSuffix(' с')
 
-        self.spin_b24_retries = QSpinBox()
+        self.spin_b24_retries = NoWheelSpinBox()
         self.spin_b24_retries.setRange(1, 10)
 
-        self.spin_rate_limit = QSpinBox()
+        self.spin_rate_limit = NoWheelSpinBox()
         self.spin_rate_limit.setRange(1, 10)
         self.spin_rate_limit.setSuffix(' запр./сек')
 

@@ -23,7 +23,7 @@ from typing import List, Tuple
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / 'gui' / 'assets'
 
-#: фирменный синий — тот же, что accent в светлой теме приложения
+#: фирменный синий — тот же, что accent в тёмной теме приложения
 BLUE = '#2C5AA0'
 BLUE_DEEP = '#1E4076'
 WHITE = '#FFFFFF'
