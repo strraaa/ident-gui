@@ -146,6 +146,12 @@ class UpdateDialog(QDialog):
         self._set_busy(False)
         self._set_status(result.message, 'success')
         self._cleanup_temp()
+        if result.deferred:
+            self.accept()
+            # Helper-процесс уже ждет завершения GUI и запустит новую версию.
+            from PySide6.QtWidgets import QApplication
+            QApplication.instance().quit()
+            return
         answer = QMessageBox.question(
             self,
             'Обновление готово',
