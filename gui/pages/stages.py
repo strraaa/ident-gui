@@ -177,7 +177,7 @@ class StagesPage(Page):
 
     def load_from_config(self):
         category_id = self.config.get('pipelines', 'deal_category_id', '0')
-        self.cmb_category.setCurrentText(category_id)
+        self._set_category_value(category_id)
 
         # Маппинг статусов
         self.table.setRowCount(0)
@@ -196,7 +196,7 @@ class StagesPage(Page):
         self._fill_checklist(self.list_lead_closed, self._config_list('lead_statuses', 'closed'), lead=True)
 
     def apply_to_config(self):
-        self.config.set('pipelines', 'deal_category_id', self.cmb_category.currentText().strip() or '0')
+        self.config.set('pipelines', 'deal_category_id', self._category_value())
 
         pairs = []
         for row in range(self.table.rowCount()):
@@ -306,7 +306,7 @@ class StagesPage(Page):
     # ------------------------------------------------------------------
 
     def _on_load(self):
-        category = self.cmb_category.currentText().strip()
+        category = self._category_value()
         category_id = int(category) if category.isdigit() else 0
 
         self.btn_load.setEnabled(False)
@@ -333,7 +333,7 @@ class StagesPage(Page):
         for category in data.get('categories', []):
             self.cmb_category.addItem(f"{category['name']} (ID {category['id']})", category['id'])
         self.cmb_category.blockSignals(False)
-        self._set_combo_value(self.cmb_category, current_category)
+        self._set_category_value(current_category)
 
         # Стадии в таблице маппинга
         for row in range(self.table.rowCount()):
@@ -419,9 +419,24 @@ class StagesPage(Page):
     def _combo_value(combo: QComboBox) -> str:
         """Код стадии независимо от способа ввода"""
         data = combo.currentData()
-        if data and combo.currentText().endswith(f'({data})'):
+        if data is not None and combo.currentText().endswith(f'({data})'):
             return str(data)
         return combo.currentText().strip()
+
+    def _category_value(self) -> str:
+        """ID воронки, включая валидный Bitrix24 ID 0 для общей воронки."""
+        data = self.cmb_category.currentData()
+        if data is not None:
+            return str(data).strip()
+        return self.cmb_category.currentText().strip() or '0'
+
+    def _set_category_value(self, value: str):
+        value = (value or '').strip() or '0'
+        for index in range(self.cmb_category.count()):
+            if str(self.cmb_category.itemData(index)).strip() == value:
+                self.cmb_category.setCurrentIndex(index)
+                return
+        self.cmb_category.setCurrentText(value)
 
     @staticmethod
     def _set_combo_value(combo: QComboBox, value: str):

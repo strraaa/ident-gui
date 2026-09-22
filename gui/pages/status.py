@@ -80,14 +80,17 @@ class StatusPage(Page):
         self.btn_start = QPushButton('Запустить')
         self.btn_stop = QPushButton('Остановить')
         self.btn_restart = QPushButton('Перезапустить')
+        self.btn_repair = QPushButton('Восстановить задачу')
 
         self.btn_start.clicked.connect(self._on_start)
         self.btn_stop.clicked.connect(self._on_stop)
         self.btn_restart.clicked.connect(self._on_restart)
+        self.btn_repair.clicked.connect(self._on_repair)
 
         buttons.addWidget(self.btn_start)
         buttons.addWidget(self.btn_stop)
         buttons.addWidget(self.btn_restart)
+        buttons.addWidget(self.btn_repair)
         buttons.addStretch()
         service_layout.addLayout(buttons)
 
@@ -203,15 +206,27 @@ class StatusPage(Page):
         if not status.available:
             self.lbl_state.setText(status.error or 'Недоступно')
             self._set_service_buttons(False)
-            self.lbl_admin_hint.setText('')
+            self.btn_repair.setEnabled(False)
+            self.lbl_admin_hint.setText(
+                'Проверьте службу Task Scheduler и права администратора.'
+                if status.error_kind == 'provider_unavailable'
+                else ''
+            )
             return
 
         if not status.exists:
-            self.lbl_state.setText(f'Задача не найдена ({status.error})')
+            if status.error_kind == 'wrong_path':
+                self.lbl_state.setText(
+                    f'Неверный путь задачи: {status.actual_task_path or status.error}'
+                )
+            else:
+                self.lbl_state.setText(status.error or 'Задача не зарегистрирована')
             self._set_service_buttons(False)
+            self.btn_repair.setEnabled(self.task_service.is_admin())
             self.lbl_admin_hint.setText(
-                'Задача планировщика не установлена. Выполните install_task_onedir.ps1 '
-                'от имени администратора.'
+                'Нажмите «Восстановить задачу» для повторной регистрации службы.'
+                if self.task_service.is_admin() else
+                'Для восстановления задачи запустите приложение от имени администратора.'
             )
             return
 
@@ -242,6 +257,7 @@ class StatusPage(Page):
 
         is_admin = self.task_service.is_admin()
         self._set_service_buttons(is_admin)
+        self.btn_repair.setEnabled(False)
         self.lbl_admin_hint.setText(
             '' if is_admin else
             'Управление службой недоступно: запустите приложение от имени администратора.'
@@ -326,6 +342,9 @@ class StatusPage(Page):
 
     def _on_restart(self):
         self._run_task_action(self.task_service.restart)
+
+    def _on_repair(self):
+        self._run_task_action(self.task_service.install)
 
     def _run_task_action(self, action):
         # Пуск/останов/перезапуск — это два-три вызова powershell подряд.

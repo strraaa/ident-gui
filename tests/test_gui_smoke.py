@@ -196,6 +196,24 @@ class MainWindowSmokeTests(unittest.TestCase):
         self.assertEqual(table.cellWidget(0, 0).currentText(), 'Запланирован')
         self.assertEqual(self.window.stages_page._row_stage(0), 'NEW')
 
+    def test_common_pipeline_with_zero_id_is_loaded_and_saved_as_zero(self):
+        page = self.window.stages_page
+        page._on_loaded({
+            'categories': [
+                {'id': '0', 'name': 'Общая'},
+                {'id': '1', 'name': 'Продажи'},
+            ],
+            'stages': [],
+            'lead_statuses': [],
+        })
+
+        self.assertEqual(page.cmb_category.currentData(), '0')
+        self.assertEqual(page.cmb_category.currentText(), 'Общая (ID 0)')
+
+        page.apply_to_config()
+
+        self.assertEqual(self.window.config.get('pipelines', 'deal_category_id'), '0')
+
     def test_overview_fills_in_when_it_becomes_current(self):
         """Страница обновляется по переходу на неё, а не только по таймеру"""
         self.window.show()
