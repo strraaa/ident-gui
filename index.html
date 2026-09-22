@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IDENT × Битрикс24 — Центр интеграции</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f5f7fb;
+      --muted: #9ca8b8;
+      --faint: #6d7888;
+      --bg: #0b1016;
+      --panel: #111821;
+      --panel-2: #161f2b;
+      --panel-3: #1b2634;
+      --line: #2b3747;
+      --line-strong: #3d4a5d;
+      --blue: #78a9df;
+      --blue-strong: #3f6f9f;
+      --blue-wash: #1e3043;
+      --green: #83b99b;
+      --green-wash: #22362c;
+      --amber: #c9a36b;
+      --amber-wash: #362d20;
+      --red: #d88a86;
+      --red-wash: #382727;
+      --radius: 6px;
+      --shadow: 0 3px 12px rgba(0, 0, 0, .16);
+      font-family: "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 1180px; background: var(--bg); color: var(--ink); font-size: 14px; }
+    h1, h2, h3, .brand strong { font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif; }
+    button, input { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #a8caff; outline-offset: 3px; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 248px 1fr; }
+    .sidebar { display: flex; flex-direction: column; padding: 24px 16px 18px; border-right: 1px solid var(--line); background: #0d141d; }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 0 10px 30px; }
+    .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid #6588aa; border-radius: 7px; background: #172536; }
+    .brand-mark svg { width: 25px; height: 25px; display: block; }
+    .brand strong { display: block; font-size: 15px; letter-spacing: -.02em; }
+    .brand span { color: var(--muted); font-size: 11px; }
+    .nav-label { margin: 19px 11px 8px; color: var(--faint); text-transform: uppercase; letter-spacing: .11em; font-size: 10px; font-weight: 700; }
+    .nav-item { display: flex; align-items: center; gap: 0; width: 100%; min-height: 36px; padding: 0 11px; margin: 2px 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); text-align: left; }
+    .nav-item:hover { background: var(--panel-2); color: var(--ink); }
+    .nav-item.active { background: var(--blue-wash); border-color: #295a9c; color: var(--ink); }
+    .nav-icon { display: none; }
+    .nav-item .dot { width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--amber); }
+    .sidebar-bottom { margin-top: auto; padding: 15px 10px 0; border-top: 1px solid var(--line); }
+    .workspace { color: var(--muted); font-size: 11px; }
+    .workspace strong { display: block; margin-top: 5px; color: var(--ink); font-size: 12px; }
+    .main { min-width: 0; }
+    .topbar { height: 62px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; border-bottom: 1px solid var(--line); }
+    .crumb { color: var(--muted); font-size: 12px; }
+    .crumb b { color: var(--ink); font-weight: 600; }
+    .top-actions { display: flex; align-items: center; gap: 12px; }
+    .icon-btn, .ghost-btn { border: 1px solid var(--line-strong); background: var(--panel); border-radius: 5px; }
+    .icon-btn { width: 36px; height: 36px; font-size: 16px; }
+    .ghost-btn { padding: 9px 13px; color: var(--muted); }
+    .ghost-btn:hover, .icon-btn:hover { border-color: var(--blue); color: var(--ink); background: var(--panel-2); }
+    .content { padding: 28px 30px; max-width: 1400px; }
+    .title-row { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: 25px; letter-spacing: -.03em; line-height: 1.1; }
+    .subhead { margin: 8px 0 0; color: var(--muted); }
+    .primary { display: inline-flex; align-items: center; gap: 8px; padding: 9px 13px; border: 1px solid var(--blue); border-radius: 5px; background: var(--blue-strong); color: white; font-weight: 600; box-shadow: none; }
+    .primary:hover { background: #5693ff; transform: translateY(-1px); }
+    .status-hero { display: grid; grid-template-columns: 1fr 265px; gap: 26px; padding: 20px 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: none; }
+    .status-title { display: flex; align-items: center; gap: 12px; }
+    .status-title h2 { margin: 0; font-size: 16px; letter-spacing: -.01em; }
+    .live { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #496c58; border-radius: 4px; color: var(--green); background: transparent; font-size: 11px; font-weight: 600; }
+    .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(87, 210, 139, .12); }
+    .status-copy { margin: 12px 0 22px; color: var(--muted); }
+    .pipeline { display: grid; grid-template-columns: 1fr 70px 1fr; align-items: center; }
+    .node { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel-2); }
+    .node-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: white; font-size: 12px; font-weight: 800; }
+    .node-mark.ident, .node-mark.bx { background: #596b7e; }
+    .node small { display: block; color: var(--muted); font-size: 11px; }
+    .node strong { display: block; margin-top: 2px; font-size: 13px; }
+    .flow-arrow { display: grid; place-items: center; color: var(--green); font-size: 20px; }
+    .flow-arrow small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+    .hero-side { padding-left: 25px; border-left: 1px solid var(--line); }
+    .hero-side-label { color: var(--muted); font-size: 11px; }
+    .hero-time { margin: 8px 0 4px; font-size: 26px; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+    .hero-meta { color: var(--green); font-size: 12px; }
+    .mini-bar { height: 5px; margin: 18px 0 8px; overflow: hidden; border-radius: 9px; background: #253142; }
+    .mini-bar span { display: block; width: 92%; height: 100%; border-radius: inherit; background: var(--green); }
+    .hero-foot { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(330px, .9fr); gap: 16px; margin-top: 16px; }
+    .panel { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+    .panel-head h3 { margin: 0; font-size: 14px; }
+    .panel-head span { color: var(--muted); font-size: 11px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); padding: 4px 0; }
+    .metric { padding: 18px 20px; border-right: 1px solid var(--line); }
+    .metric:last-child { border-right: 0; }
+    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-value { margin: 7px 0 5px; font-size: 25px; font-weight: 700; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+    .metric-note { color: var(--green); font-size: 11px; }
+    .metric-note.warn { color: var(--amber); }
+    .activity { padding: 7px 20px 12px; }
+    .activity-row { display: grid; grid-template-columns: 66px 9px 1fr auto; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid #202a37; }
+    .activity-row:last-child { border-bottom: 0; }
+    .activity-time { color: var(--faint); font: 11px "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .activity-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .activity-dot.blue { background: var(--blue); }
+    .activity-dot.amber { background: var(--amber); }
+    .activity-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-copy strong { font-size: 12px; }
+    .activity-copy span { color: var(--muted); font-size: 11px; }
+    .activity-tag { padding: 4px 7px; border-radius: 5px; color: var(--muted); background: var(--panel-3); font-size: 10px; }
+    .queue-list { padding: 7px 20px 13px; }
+    .queue-row { display: flex; align-items: center; justify-content: space-between; min-height: 48px; border-bottom: 1px solid #202a37; }
+    .queue-row:last-child { border: 0; }
+    .queue-label { display: flex; align-items: center; gap: 0; color: var(--muted); font-size: 12px; }
+    .queue-icon { display: none; }
+    .queue-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .queue-value.warn { color: var(--amber); }
+    .queue-value.good { color: var(--green); }
+    .attention { margin-top: 16px; border: 1px solid #66553a; border-radius: var(--radius); background: var(--panel); }
+    .attention .panel-head { border-bottom-color: #4d3820; }
+    .attention .panel-head h3 { color: var(--ink); }
+    .attention-body { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 20px; }
+    .attention-body p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .small-btn { padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: transparent; color: var(--ink); white-space: nowrap; font-size: 11px; font-weight: 600; }
+    .small-btn:hover { background: var(--panel-3); }
+    .toast { position: fixed; right: 28px; bottom: 26px; display: flex; align-items: center; gap: 10px; padding: 13px 16px; border: 1px solid #357d57; border-radius: 9px; background: #142a20; color: #d9f8e5; box-shadow: var(--shadow); transform: translateY(20px); opacity: 0; pointer-events: none; transition: .2s ease; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .view { display: none; }
+    .view.active { display: block; }
+    body:not(.page-overview) #view-overview > *:not(.view) { display: none; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .form-grid.single { grid-template-columns: 1fr; }
+    .field { display: flex; flex-direction: column; gap: 7px; }
+    .field label { color: var(--muted); font-size: 12px; }
+    .field input, .field select, .field textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel-2); color: var(--ink); }
+    .field textarea { min-height: 90px; resize: vertical; }
+    .section-actions { display: flex; gap: 9px; margin-top: 18px; }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 5px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+    th { color: var(--muted); background: var(--panel-2); font-size: 11px; font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    td.secondary { color: var(--muted); }
+    .status-text { color: var(--green); }
+    .status-warning { color: var(--amber); }
+    .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .toolbar input { width: 280px; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel); color: var(--ink); }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 13px 0; border-bottom: 1px solid var(--line); }
+    .toggle-row:last-child { border-bottom: 0; }
+    .toggle-row p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .toggle { width: 38px; height: 20px; border: 0; border-radius: 10px; background: var(--blue-strong); }
+    .toggle.off { background: var(--line-strong); }
+    .tabs { display: flex; gap: 18px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .tab { padding: 0 0 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); }
+    .tab.active { border-color: var(--blue); color: var(--ink); }
+    .overview-status { display: grid; grid-template-columns: 1fr 220px; min-height: 166px; }
+    .overview-status-main { padding: 22px 24px; }
+    .state-mark { width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
+    .overview-status .status-title { gap: 9px; }
+    .overview-status .status-copy { margin: 10px 0 20px 18px; }
+    .overview-facts { display: flex; gap: 34px; margin-left: 18px; }
+    .overview-facts div { display: flex; flex-direction: column; gap: 5px; }
+    .overview-facts span, .overview-health span { color: var(--muted); font-size: 11px; }
+    .overview-facts strong { font-size: 12px; font-weight: 600; }
+    .overview-health { display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 20px 22px; border-left: 1px solid var(--line); }
+    .overview-health strong { font-size: 23px; font-weight: 600; }
+    .overview-health small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .overview-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .8fr); gap: 16px; margin-top: 16px; }
+    .overview-table th, .overview-table td { padding: 12px 14px; }
+    .overview-queue { padding: 8px 20px; }
+    .overview-queue > div { display: flex; justify-content: space-between; align-items: center; min-height: 42px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .overview-queue > div:last-child { border-bottom: 0; }
+    .overview-queue strong { color: var(--ink); font-size: 15px; font-weight: 600; }
+    .overview-note { display: flex; flex-direction: column; gap: 6px; margin: 5px 20px 18px; padding: 12px; border: 1px solid #66553a; border-radius: 5px; }
+    .overview-note strong { font-size: 12px; }
+    .overview-note span { color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .overview-note .small-btn { align-self: flex-start; margin-top: 3px; }
+    @media (max-width: 1260px) { body { min-width: 1024px; } .app { grid-template-columns: 220px 1fr; } .content { padding: 26px; } .status-hero { grid-template-columns: 1fr 250px; } }
+  </style>
+</head>
+<body class="page-overview">
+  <!-- THESIS: Оператор видит состояние интеграции как поток данных, а не как набор разрозненных форм.
+       OWN-WORLD: глубокий сине-графитовый фон, blue system accent, тонкие data-grid разделители и плотные рабочие панели.
+       STORY: за несколько секунд пользователь понимает «всё ли работает», что прошло и какой следующий шаг нужен.
+       FIRST VIEWPORT: слева — навигация, в центре — статус Ident → Битрикс24, ниже — очередь и события; главный action в правом верхнем углу.
+       FORM: Operate / status console — рабочая панель наблюдения вместо типового hero с маркетинговыми метриками. -->
+  <div class="app">
+    <aside class="sidebar" aria-label="Основная навигация">
+      <div class="brand">
+        <div class="brand-mark" aria-label="Знак интеграции IDENT и Битрикс24">
+          <svg viewBox="0 0 32 32" role="img" aria-hidden="true">
+            <path d="M8 7h7a6 6 0 0 1 0 12H9" fill="none" stroke="#78a9df" stroke-width="3.5" stroke-linecap="round"/>
+            <path d="M24 25h-7a6 6 0 0 1 0-12h6" fill="none" stroke="#aebed0" stroke-width="3.5" stroke-linecap="round"/>
+            <path d="M11 16h10" fill="none" stroke="#78a9df" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div><strong>IDENT × Битрикс24</strong><span>Центр интеграции</span></div>
+      </div>
+      <div class="nav-label">Наблюдение</div>
+      <button class="nav-item active" type="button" data-page="overview"><span class="nav-icon"></span><span>Обзор</span></button>
+      <button class="nav-item" type="button" data-page="queue"><span class="nav-icon"></span><span>Очередь</span><span class="dot" aria-label="3 ожидают"></span></button>
+      <button class="nav-item" type="button" data-page="logs"><span class="nav-icon"></span><span>Журнал</span></button>
+      <div class="nav-label">Настройка</div>
+      <button class="nav-item" type="button" data-page="connections"><span class="nav-icon"></span><span>Подключения</span></button>
+      <button class="nav-item" type="button" data-page="fields"><span class="nav-icon"></span><span>Поля</span><span class="dot" aria-label="есть черновик"></span></button>
+      <button class="nav-item" type="button" data-page="stages"><span class="nav-icon"></span><span>Стадии и воронка</span></button>
+      <button class="nav-item" type="button" data-page="sync"><span class="nav-icon"></span><span>Синхронизация</span></button>
+      <div class="sidebar-bottom">
+        <div class="workspace">Рабочая папка<strong>C:\Program Files\IdentBitrix24</strong></div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb">Наблюдение&nbsp; / &nbsp;<b>Обзор интеграции</b></div>
+        <div class="top-actions">
+          <button class="ghost-btn" type="button" id="refresh">Обновить</button>
+          <button class="ghost-btn action" type="button" id="updates" data-message="Установлена последняя версия приложения">Проверить обновления</button>
+          <button class="ghost-btn" type="button" id="help">Справка</button>
+        </div>
+      </header>
+      <div class="content">
+        <div class="view active" id="view-overview">
+          <div class="title-row">
+            <div><h1>Обзор</h1><p class="subhead">Состояние службы и последние операции</p></div>
+            <div class="section-actions" style="margin-top:0"><button class="ghost-btn action" data-message="Служба остановлена">Остановить службу</button><button class="primary" type="button" id="restart">Перезапустить службу</button></div>
+          </div>
+          <section class="overview-status panel" aria-labelledby="status-heading">
+            <div class="overview-status-main">
+              <div class="status-title"><span class="state-mark"></span><h2 id="status-heading">Служба работает</h2><span class="live">Активна</span></div>
+              <p class="status-copy">Последняя синхронизация завершена успешно. Следующий запуск — через 8 минут.</p>
+              <div class="overview-facts">
+                <div><span>Последний запуск</span><strong>Сегодня, 14:32:08</strong></div>
+                <div><span>Результат</span><strong class="status-text">148 записей · без ошибок</strong></div>
+                <div><span>Следующий запуск</span><strong>Сегодня, 14:40:00</strong></div>
+              </div>
+            </div>
+            <div class="overview-health"><span>Подключения</span><strong>2 из 2</strong><small>IDENT и Битрикс24 доступны</small></div>
+          </section>
+          <div class="overview-grid">
+            <section class="panel" aria-labelledby="runs-heading">
+              <div class="panel-head"><h3 id="runs-heading">Последние запуски</h3><span>Сегодня</span></div>
+              <div class="table-wrap overview-table"><table><thead><tr><th>Время</th><th>Результат</th><th>Записей</th><th>Длительность</th></tr></thead><tbody><tr><td>14:32:08</td><td class="status-text">Успешно</td><td>148</td><td class="secondary">1,8 с</td></tr><tr><td>14:22:07</td><td class="status-text">Успешно</td><td>126</td><td class="secondary">1,6 с</td></tr><tr><td>14:12:06</td><td class="status-warning">С предупреждением</td><td>131</td><td class="secondary">2,4 с</td></tr><tr><td>14:02:05</td><td class="status-text">Успешно</td><td>119</td><td class="secondary">1,5 с</td></tr></tbody></table></div>
+            </section>
+            <section class="panel" aria-labelledby="overview-queue-heading">
+              <div class="panel-head"><h3 id="overview-queue-heading">Очередь</h3><button class="small-btn" type="button" id="queue">Открыть</button></div>
+              <div class="overview-queue"><div><span>Ожидают отправки</span><strong class="status-warning">3</strong></div><div><span>Обработано сегодня</span><strong>1 281</strong></div><div><span>Ошибки без повтора</span><strong class="status-text">0</strong></div></div>
+              <div class="overview-note"><strong>Требует внимания</strong><span>3 записи ждут повторной отправки из-за временного тайм-аута API.</span><button class="small-btn action" data-message="3 записи отправлены на повтор">Повторить</button></div>
+            </section>
+          </div>
+        </div>
+        <div class="view" id="view-queue">
+          <div class="title-row"><div><h1>Очередь повторных попыток</h1><p class="subhead">Записи, которые не удалось передать с первого раза</p></div><button class="primary action" data-message="Повторная отправка очереди запущена">Повторить всю очередь</button></div>
+          <div class="panel"><div class="panel-head"><h3>Ожидают отправки · 3</h3><button class="ghost-btn action" data-message="Очередь обновлена">Обновить</button></div><div class="table-wrap"><table><thead><tr><th>Запись</th><th>Источник</th><th>Причина</th><th>Последняя попытка</th><th>Действие</th></tr></thead><tbody><tr><td>CRM-10482</td><td class="secondary">IDENT</td><td class="status-warning">Тайм-аут API</td><td class="secondary">13:58:01</td><td><button class="small-btn action" data-message="CRM-10482 отправлена на повтор">Повторить</button></td></tr><tr><td>CRM-10479</td><td class="secondary">IDENT</td><td class="status-warning">Временная ошибка</td><td class="secondary">13:41:18</td><td><button class="small-btn action" data-message="CRM-10479 отправлена на повтор">Повторить</button></td></tr><tr><td>CRM-10463</td><td class="secondary">IDENT</td><td class="status-warning">Тайм-аут API</td><td class="secondary">12:56:44</td><td><button class="small-btn action" data-message="CRM-10463 отправлена на повтор">Повторить</button></td></tr></tbody></table></div></div>
+        </div>
+        <div class="view" id="view-logs">
+          <div class="title-row"><div><h1>Журнал</h1><p class="subhead">События службы и приложения</p></div><button class="ghost-btn action" data-message="Журнал обновлён">Обновить</button></div>
+          <div class="toolbar"><input aria-label="Поиск по журналу" placeholder="Поиск по журналу"><button class="ghost-btn">Только ошибки</button><button class="ghost-btn action" data-message="Журнал сохранён в файл">Сохранить CSV</button></div>
+          <div class="panel"><div class="table-wrap"><table><thead><tr><th>Время</th><th>Уровень</th><th>Источник</th><th>Сообщение</th></tr></thead><tbody><tr><td class="secondary">14:32:08</td><td class="status-text">INFO</td><td>Синхронизация</td><td>Цикл завершён: 148 записей, 0 ошибок</td></tr><tr><td class="secondary">14:31:54</td><td class="status-text">INFO</td><td>IDENT</td><td>Получены новые записи для отправки</td></tr><tr><td class="secondary">13:58:01</td><td class="status-warning">WARN</td><td>Битрикс24</td><td>Тайм-аут API. Запись добавлена в очередь</td></tr></tbody></table></div></div>
+        </div>
+        <div class="view" id="view-connections">
+          <div class="title-row"><div><h1>Подключения</h1><p class="subhead">Параметры доступа к IDENT и Битрикс24</p></div><button class="primary action" data-message="Настройки подключений сохранены">Сохранить</button></div>
+          <div class="form-grid"><section class="panel"><div class="panel-head"><h3>IDENT / SQL Server</h3><span class="status-text">Подключено</span></div><div class="form-grid single" style="padding:20px"><div class="field"><label for="db-host">Сервер</label><input id="db-host" value="localhost\SQLEXPRESS"></div><div class="field"><label for="db-name">База данных</label><input id="db-name" value="IDENT"></div><div class="field"><label for="db-user">Пользователь</label><input id="db-user" value="ident_sync"></div><button class="ghost-btn action" data-message="Подключение к IDENT проверено">Проверить подключение</button></div></section><section class="panel"><div class="panel-head"><h3>Битрикс24</h3><span class="status-text">Подключено</span></div><div class="form-grid single" style="padding:20px"><div class="field"><label for="bx-url">Адрес портала</label><input id="bx-url" value="https://company.bitrix24.ru"></div><div class="field"><label for="bx-token">Webhook-токен</label><input id="bx-token" value="••••••••••••••••" type="password"></div><button class="ghost-btn action" data-message="Подключение к Битрикс24 проверено">Проверить подключение</button></div></section></div>
+        </div>
+        <div class="view" id="view-fields">
+          <div class="title-row"><div><h1>Поля</h1><p class="subhead">Соответствие полей IDENT пользовательским полям CRM</p></div><button class="primary action" data-message="Соответствие полей сохранено">Сохранить</button></div>
+          <div class="panel"><div class="panel-head"><h3>Соответствие полей</h3><button class="ghost-btn action" data-message="Список полей обновлён">Обновить поля Битрикс24</button></div><div class="table-wrap"><table><thead><tr><th>Поле IDENT</th><th>Поле Битрикс24</th><th>Тип</th><th>Статус</th></tr></thead><tbody><tr><td>Номер приёма</td><td><select><option>UF_CRM_RECEPTION_ID</option></select></td><td class="secondary">Строка</td><td class="status-text">Сопоставлено</td></tr><tr><td>Филиал</td><td><select><option>UF_CRM_BRANCH</option></select></td><td class="secondary">Список</td><td class="status-text">Сопоставлено</td></tr><tr><td>Дата приёма</td><td><select><option>UF_CRM_RECEPTION_DATE</option></select></td><td class="secondary">Дата</td><td class="status-text">Сопоставлено</td></tr><tr><td>Ответственный</td><td><select><option>Не выбрано</option></select></td><td class="secondary">Пользователь</td><td class="status-warning">Не настроено</td></tr></tbody></table></div></div>
+        </div>
+        <div class="view" id="view-stages">
+          <div class="title-row"><div><h1>Стадии и воронка</h1><p class="subhead">Правила перехода сделки по статусам приёма</p></div><button class="primary action" data-message="Настройки стадий сохранены">Сохранить</button></div>
+          <div class="panel"><div class="panel-head"><h3>Воронка «Приёмы»</h3><select><option>Приёмы пациентов</option></select></div><div class="table-wrap"><table><thead><tr><th>Статус IDENT</th><th>Стадия сделки</th><th>Финальная</th><th>Изменение</th></tr></thead><tbody><tr><td>Новый</td><td><select><option>Новая</option></select></td><td>Нет</td><td>Разрешено</td></tr><tr><td>В работе</td><td><select><option>В работе</option></select></td><td>Нет</td><td>Разрешено</td></tr><tr><td>Завершён</td><td><select><option>Успешно реализовано</option></select></td><td class="status-text">Да</td><td>Защищено</td></tr></tbody></table></div></div>
+        </div>
+        <div class="view" id="view-sync">
+          <div class="title-row"><div><h1>Синхронизация</h1><p class="subhead">Интервал, пакетная обработка и параметры очереди</p></div><button class="primary action" data-message="Параметры синхронизации сохранены">Сохранить</button></div>
+          <div class="form-grid"><section class="panel"><div class="panel-head"><h3>Параметры цикла</h3></div><div class="form-grid single" style="padding:20px"><div class="field"><label>Интервал цикла, минут</label><input type="number" value="10"></div><div class="field"><label>Размер пакета</label><input type="number" value="100"></div><div class="field"><label>Филиал</label><select><option>Все филиалы</option></select></div></div></section><section class="panel"><div class="panel-head"><h3>Дополнительные параметры</h3></div><div style="padding:8px 20px"><div class="toggle-row"><div><strong>Повторять ошибки автоматически</strong><p>Записи возвращаются в очередь после временной ошибки</p></div><button class="toggle" aria-label="Повторять ошибки включено"></button></div><div class="toggle-row"><div><strong>Подробное журналирование</strong><p>Записывать тело запросов и ответов API</p></div><button class="toggle off" aria-label="Подробное журналирование выключено"></button></div></div></section></div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"><span>✓</span><span id="toastText">Готово</span></div>
+  <script>
+    const toast = document.getElementById('toast');
+    const toastText = document.getElementById('toastText');
+    let toastTimer;
+    function showToast(message) {
+      toastText.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+    document.getElementById('refresh').addEventListener('click', () => showToast('Данные обновлены только что'));
+    document.getElementById('restart').addEventListener('click', () => showToast('Перезапуск службы поставлен в очередь'));
+    document.getElementById('queue').addEventListener('click', () => showToast('Открываем очередь повторных попыток'));
+    document.getElementById('help').addEventListener('click', () => showToast('Справка по разделу «Обзор»'));
+    function openPage(page, label) {
+      document.getElementById('view-overview').classList.add('active');
+      document.querySelectorAll('.view:not(#view-overview)').forEach((view) => view.classList.remove('active'));
+      document.getElementById('view-' + page).classList.add('active');
+      if (page === 'overview') {
+        document.querySelectorAll('.view:not(#view-overview)').forEach((view) => view.classList.remove('active'));
+      }
+      document.body.className = 'page-' + page;
+      document.querySelector('.crumb b').textContent = label;
+    }
+    document.querySelectorAll('.nav-item').forEach((item) => item.addEventListener('click', () => {
+      document.querySelector('.nav-item.active').classList.remove('active');
+      item.classList.add('active');
+      openPage(item.dataset.page, item.querySelector('.nav-icon + span').textContent);
+    }));
+    document.querySelectorAll('.action').forEach((item) => item.addEventListener('click', () => {
+      showToast(item.dataset.message || 'Изменения сохранены');
+    }));
+    document.querySelectorAll('.toggle').forEach((item) => item.addEventListener('click', () => {
+      item.classList.toggle('off');
+      showToast(item.classList.contains('off') ? 'Параметр выключен' : 'Параметр включён');
+    }));
+  </script>
+</body>
+</html>

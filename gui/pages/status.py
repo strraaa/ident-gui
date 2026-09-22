@@ -8,12 +8,13 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QVBoxLayout
+    QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
+    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QHeaderView
 )
 
 from gui.services.config_service import ConfigService
-from gui.services.queue_service import QueueService
+from gui.services.queue_service import QueueLockError, QueueService
 from gui.services.task_service import TaskService
 from gui.services.workers import WorkerRunner
 from gui.pages.page import Page, Section
@@ -53,101 +54,167 @@ class StatusPage(Page):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
+        layout.setSpacing(16)
 
-        # --- Служба ---
-        service_box = QGroupBox('Служба синхронизации')
-        service_layout = QVBoxLayout(service_box)
-
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
-
-        # Состояние и результат — отметки: их видно, не читая
         self.lbl_state = Badge('—')
         self.lbl_last_run = QLabel('—')
         self.lbl_last_result = Badge('—')
         self.lbl_next_run = QLabel('—')
         self.lbl_processes = QLabel('—')
-
-        form.addRow('Состояние:', self.lbl_state)
-        form.addRow('Последний запуск:', self.lbl_last_run)
-        form.addRow('Результат:', self.lbl_last_result)
-        form.addRow('Следующий запуск:', self.lbl_next_run)
-        form.addRow('Процессов запущено:', self.lbl_processes)
-        service_layout.addLayout(form)
-
-        buttons = QHBoxLayout()
-        self.btn_start = QPushButton('Запустить')
-        self.btn_stop = QPushButton('Остановить')
-        self.btn_restart = QPushButton('Перезапустить')
-        self.btn_repair = QPushButton('Восстановить задачу')
-
-        self.btn_start.clicked.connect(self._on_start)
-        self.btn_stop.clicked.connect(self._on_stop)
-        self.btn_restart.clicked.connect(self._on_restart)
-        self.btn_repair.clicked.connect(self._on_repair)
-
-        buttons.addWidget(self.btn_start)
-        buttons.addWidget(self.btn_stop)
-        buttons.addWidget(self.btn_restart)
-        buttons.addWidget(self.btn_repair)
-        buttons.addStretch()
-        service_layout.addLayout(buttons)
-
-        self.lbl_admin_hint = QLabel()
-        self.lbl_admin_hint.setWordWrap(True)
-        set_tone(self.lbl_admin_hint, 'muted')
-        service_layout.addWidget(self.lbl_admin_hint)
-
-        layout.addWidget(service_box)
-
-        # --- Синхронизация ---
-        sync_box = QGroupBox('Синхронизация')
-        sync_form = QFormLayout(sync_box)
-        sync_form.setLabelAlignment(Qt.AlignRight)
-
         self.lbl_last_sync = QLabel('—')
         self.lbl_sync_age = QLabel('—')
         self.lbl_filial = QLabel('—')
         self.lbl_interval = QLabel('—')
-
-        sync_form.addRow('Данные обработаны до:', self.lbl_last_sync)
-        sync_form.addRow('Отставание:', self.lbl_sync_age)
-        sync_form.addRow('Филиал:', self.lbl_filial)
-        sync_form.addRow('Интервал цикла:', self.lbl_interval)
-
-        layout.addWidget(sync_box)
-
-        # --- Очередь ---
-        queue_box = QGroupBox('Очередь повторных попыток')
-        queue_form = QFormLayout(queue_box)
-        queue_form.setLabelAlignment(Qt.AlignRight)
-
         self.lbl_queue_total = QLabel('—')
         self.lbl_queue_waiting = QLabel('—')
         self.lbl_queue_exhausted = QLabel('—')
-
-        queue_form.addRow('Всего записей:', self.lbl_queue_total)
-        queue_form.addRow('Ожидают отправки:', self.lbl_queue_waiting)
-        queue_form.addRow('Попытки исчерпаны:', self.lbl_queue_exhausted)
-
-        layout.addWidget(queue_box)
-
-        # --- Конфигурация ---
-        config_box = QGroupBox('Конфигурация')
-        config_layout = QVBoxLayout(config_box)
-
-        self.lbl_config_path = QLabel('—')
-        self.lbl_config_path.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.lbl_config_path.setWordWrap(True)
-        config_layout.addWidget(self.lbl_config_path)
-
+        self.lbl_config_path = QLabel()
         self.lbl_config_problems = QLabel()
-        self.lbl_config_problems.setWordWrap(True)
-        config_layout.addWidget(self.lbl_config_problems)
 
-        layout.addWidget(config_box)
+        title = QLabel('Обзор')
+        title.setProperty('role', 'title')
+        subtitle = QLabel('Состояние службы и последние операции')
+        set_tone(subtitle, 'muted')
+        title_row = QHBoxLayout()
+        title_row.addWidget(title)
+        title_row.addStretch()
+
+        self.btn_start = QPushButton('Запустить службу')
+        self.btn_start.clicked.connect(self._on_start)
+        self.btn_stop = QPushButton('Остановить службу')
+        self.btn_stop.clicked.connect(self._on_stop)
+        self.btn_restart = QPushButton('Перезапустить службу')
+        self.btn_restart.setProperty('variant', 'primary')
+        self.btn_restart.clicked.connect(self._on_restart)
+        self.btn_repair = QPushButton('Восстановить задачу')
+        self.btn_repair.clicked.connect(self._on_repair)
+        self.lbl_admin_hint = QLabel()
+        set_tone(self.lbl_admin_hint, 'muted')
+        self.lbl_admin_hint.hide()
+        self.btn_start.hide()
+        self.btn_repair.hide()
+
+        actions = QHBoxLayout()
+        actions.addStretch()
+        actions.addWidget(self.btn_stop)
+        actions.addWidget(self.btn_restart)
+        title_row.addLayout(actions)
+        layout.addLayout(title_row)
+        layout.addWidget(subtitle)
+
+        status_box = QFrame()
+        status_box.setProperty('role', 'overview-status')
+        status_layout = QHBoxLayout(status_box)
+        status_layout.setContentsMargins(18, 16, 18, 16)
+        main_status = QVBoxLayout()
+        status_line = QHBoxLayout()
+        state_mark = QLabel()
+        state_mark.setProperty('role', 'state-mark')
+        state_mark.setFixedSize(9, 9)
+        self.lbl_overview_state = QLabel('Служба работает')
+        self.lbl_overview_state.setProperty('strong', True)
+        self.lbl_overview_live = Badge('Активна', 'success')
+        status_line.addWidget(state_mark)
+        status_line.addWidget(self.lbl_overview_state)
+        status_line.addWidget(self.lbl_overview_live)
+        status_line.addStretch()
+        main_status.addLayout(status_line)
+        self.lbl_overview_copy = QLabel('Последняя синхронизация завершена успешно.')
+        set_tone(self.lbl_overview_copy, 'muted')
+        main_status.addWidget(self.lbl_overview_copy)
+        facts = QGridLayout()
+        self.lbl_fact_last = self._fact(facts, 0, 'Последний запуск')
+        self.lbl_fact_result = self._fact(facts, 1, 'Результат')
+        self.lbl_fact_next = self._fact(facts, 2, 'Следующий запуск')
+        main_status.addLayout(facts)
+        status_layout.addLayout(main_status, 1)
+        health = QVBoxLayout()
+        health.addWidget(self._muted_label('Подключения'))
+        self.lbl_health = QLabel('—')
+        self.lbl_health.setProperty('role', 'metric')
+        health.addWidget(self.lbl_health)
+        self.lbl_health_hint = self._muted_label('IDENT и Битрикс24 доступны')
+        health.addWidget(self.lbl_health_hint)
+        status_layout.addLayout(health)
+        layout.addWidget(status_box)
+
+        lower = QHBoxLayout()
+        runs_box = QFrame()
+        runs_box.setProperty('role', 'panel')
+        runs_layout = QVBoxLayout(runs_box)
+        runs_layout.addWidget(self._panel_heading('Последний запуск', 'Сегодня'))
+        self.runs_table = QTableWidget(0, 4)
+        self.runs_table.setHorizontalHeaderLabels(['Время', 'Результат', 'Записей', 'Длительность'])
+        self.runs_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.runs_table.verticalHeader().setVisible(False)
+        self.runs_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.runs_table.setSelectionMode(QTableWidget.NoSelection)
+        runs_layout.addWidget(self.runs_table)
+        lower.addWidget(runs_box, 3)
+
+        queue_box = QFrame()
+        queue_box.setProperty('role', 'panel')
+        queue_layout = QVBoxLayout(queue_box)
+        queue_head = QHBoxLayout()
+        queue_head.addWidget(QLabel('Очередь'))
+        queue_head.addStretch()
+        self.btn_queue = QPushButton('Открыть')
+        self.btn_queue.clicked.connect(lambda: self._show_queue_hint())
+        queue_head.addWidget(self.btn_queue)
+        queue_layout.addLayout(queue_head)
+        queue_form = QFormLayout()
+        queue_form.addRow('Ожидают отправки:', self.lbl_queue_waiting)
+        queue_form.addRow('Обработано сегодня:', self.lbl_queue_total)
+        queue_form.addRow('Ошибки без повтора:', self.lbl_queue_exhausted)
+        queue_layout.addLayout(queue_form)
+        self.queue_attention = QLabel('Требует внимания\n3 записи ждут повторной отправки.')
+        self.queue_attention.setWordWrap(True)
+        set_tone(self.queue_attention, 'warning')
+        queue_layout.addWidget(self.queue_attention)
+        self.btn_retry = QPushButton('Повторить')
+        self.btn_retry.clicked.connect(self._on_retry_queue)
+        queue_layout.addWidget(self.btn_retry, alignment=Qt.AlignLeft)
+        lower.addWidget(queue_box, 2)
+        layout.addLayout(lower)
         layout.addStretch()
+
+    @staticmethod
+    def _muted_label(text: str) -> QLabel:
+        label = QLabel(text)
+        set_tone(label, 'muted')
+        return label
+
+    def _fact(self, layout: QGridLayout, column: int, title: str) -> QLabel:
+        label = self._muted_label(title)
+        value = QLabel('—')
+        value.setProperty('strong', True)
+        layout.addWidget(label, 0, column)
+        layout.addWidget(value, 1, column)
+        return value
+
+    @staticmethod
+    def _panel_heading(title: str, hint: str) -> QWidget:
+        widget = QWidget()
+        row = QHBoxLayout(widget)
+        row.setContentsMargins(0, 0, 0, 6)
+        row.addWidget(QLabel(title))
+        row.addStretch()
+        hint_label = QLabel(hint)
+        set_tone(hint_label, 'muted')
+        row.addWidget(hint_label)
+        return widget
+
+    def _show_queue_hint(self):
+        self.queue_attention.setText('Откройте раздел «Очередь» в меню для управления записями.')
+
+    def _on_retry_queue(self):
+        try:
+            count = QueueService(self.config.queue_file_path()).reset_all_unsent()
+        except (QueueLockError, OSError) as error:
+            QMessageBox.warning(self, 'Очередь', f'Не удалось изменить очередь: {error}')
+            return
+        QMessageBox.information(self, 'Очередь', f'Записей отправлено на повтор: {count}')
+        self.refresh()
 
     # ------------------------------------------------------------------
 
@@ -205,6 +272,7 @@ class StatusPage(Page):
     def _apply_service(self, status):
         if not status.available:
             self.lbl_state.setText(status.error or 'Недоступно')
+            self._set_overview_service('Служба недоступна', 'Недоступна', status.error or 'Нет ответа от планировщика')
             self._set_service_buttons(False)
             self.btn_repair.setEnabled(False)
             self.lbl_admin_hint.setText(
@@ -221,6 +289,7 @@ class StatusPage(Page):
                 )
             else:
                 self.lbl_state.setText(status.error or 'Задача не зарегистрирована')
+            self._set_overview_service('Служба не зарегистрирована', 'Требует настройки', self.lbl_state.text())
             self._set_service_buttons(False)
             self.btn_repair.setEnabled(self.task_service.is_admin())
             self.lbl_admin_hint.setText(
@@ -240,10 +309,24 @@ class StatusPage(Page):
 
         if status.last_task_result is None:
             self.lbl_last_result.set_state('—')
+            result_text = 'Нет данных'
         elif status.last_result_is_error:
             self.lbl_last_result.set_state(f'Код {status.last_task_result} — ошибка', 'danger')
+            result_text = f'Код {status.last_task_result} — ошибка'
         else:
             self.lbl_last_result.set_state(f'Код {status.last_task_result}', 'success')
+            result_text = f'Код {status.last_task_result}'
+
+        self._set_overview_service(
+            'Служба работает' if status.is_running else status.state_title,
+            'Активна' if status.is_running else status.state_title,
+            'Последняя синхронизация завершена успешно.'
+            if not status.last_result_is_error else 'Последний запуск завершился с ошибкой.'
+        )
+        self.lbl_fact_last.setText(status.last_run_time or '—')
+        self.lbl_fact_result.setText(result_text)
+        self.lbl_fact_next.setText(status.next_run_time or '—')
+        self._populate_runs(status)
 
         if len(status.processes) > 1:
             self.lbl_processes.setText(
@@ -301,8 +384,30 @@ class StatusPage(Page):
         self.lbl_queue_total.setText(str(stats['total']))
         self.lbl_queue_waiting.setText(str(max(waiting, 0)))
         self.lbl_queue_exhausted.setText(str(stats['exhausted']))
+        self.queue_attention.setText(
+            'Ошибок без повтора нет.'
+            if not waiting else
+            f'{max(waiting, 0)} записей ждут повторной отправки.'
+        )
         set_tone(self.lbl_queue_exhausted, 'danger' if stats['exhausted'] else None)
         set_strong(self.lbl_queue_exhausted, bool(stats['exhausted']))
+
+    def _set_overview_service(self, title: str, live: str, copy: str):
+        self.lbl_overview_state.setText(title)
+        self.lbl_overview_live.set_state(live, 'success' if live == 'Активна' else 'warning')
+        self.lbl_overview_copy.setText(copy)
+
+    def _populate_runs(self, status):
+        self.runs_table.setRowCount(1)
+        values = [
+            status.last_run_time or '—',
+            'Ошибка' if status.last_result_is_error else 'Успешно',
+            '—',
+            '—',
+        ]
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            self.runs_table.setItem(0, column, item)
 
     def _refresh_config(self):
         self.lbl_config_path.setText(str(self.config.workspace.config_path))

@@ -255,6 +255,26 @@ QFrame[role="banner"][tone="accent"] {{
     border-color: {p.accent};
 }}
 
+QFrame[role="panel"], QFrame[role="overview-status"] {{
+    background: {p.surface};
+    border: 1px solid {p.border};
+    border-radius: {tokens.RADIUS}px;
+}}
+
+QFrame[role="overview-status"] {{
+    background: {p.surface_alt};
+}}
+
+QLabel[role="state-mark"] {{
+    background: {p.success};
+    border-radius: 5px;
+}}
+
+QLabel[role="metric"] {{
+    font-size: {tokens.FONT_SIZE_TITLE + 5}px;
+    font-weight: 600;
+}}
+
 /* ---------- отметки состояния ---------- */
 
 QLabel[role="badge"] {{
