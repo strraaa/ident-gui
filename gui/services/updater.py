@@ -27,6 +27,7 @@ Releases, откуда апдейтер и берёт файл. Отдельно
 """
 
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -87,6 +88,7 @@ class InstallResult:
     installed: bool
     restart_required: bool
     message: str
+    deferred: bool = False
 
 
 # ----------------------------------------------------------------------
@@ -317,6 +319,19 @@ def install(archive: Path, install_dir: Optional[Path] = None,
         if not exe.exists():
             raise UpdateError(f'В скачанном архиве нет {EXE_NAME} — архив собран неверно')
 
+        # На Windows работающий exe удерживает каталог установки. Нельзя
+        # переименовать его из самого GUI: WinError 32 возникает до rollback.
+        if (
+            sys.platform == 'win32'
+            and getattr(sys, 'frozen', False)
+            and install_dir.resolve() == app_dir().resolve()
+        ):
+            return _schedule_deferred_install(
+                extracted,
+                install_dir,
+                os.getpid(),
+            )
+
         backup_dir = install_dir.with_name(install_dir.name + '.bak')
         if backup_dir.exists():
             shutil.rmtree(backup_dir, ignore_errors=True)
@@ -348,6 +363,133 @@ def install(archive: Path, install_dir: Optional[Path] = None,
         installed=True, restart_required=True,
         message='Обновление установлено. Перезапустите приложение, чтобы применить его.'
     )
+
+
+def _schedule_deferred_install(
+    extracted: Path,
+    install_dir: Path,
+    process_id: int,
+) -> InstallResult:
+    """Передает замену внешнему процессу после закрытия текущего GUI."""
+    staging = Path(tempfile.mkdtemp(prefix='ident_settings_staged_'))
+    staged_app = staging / install_dir.name
+    shutil.copytree(extracted, staged_app)
+
+    script = staging / 'apply_update.ps1'
+    script.write_text(
+        _deferred_script(),
+        encoding='utf-8',
+    )
+
+    command = [
+        'powershell',
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        str(script),
+        '-ProcessId',
+        str(process_id),
+        '-InstallDir',
+        str(install_dir),
+        '-StagedDir',
+        str(staged_app),
+        '-BackupDir',
+        str(install_dir.with_name(install_dir.name + '.bak')),
+        '-ExeName',
+        EXE_NAME,
+        '-CleanupDir',
+        str(staging),
+    ]
+    try:
+        subprocess.Popen(
+            command,
+            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            | getattr(subprocess, 'DETACHED_PROCESS', 0),
+            close_fds=True,
+        )
+    except OSError as e:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise UpdateError(f'Не удалось запустить помощник обновления: {e}') from e
+
+    log.info('Отложенная установка передана helper-процессу, PID=%s', process_id)
+    return InstallResult(
+        installed=True,
+        restart_required=True,
+        deferred=True,
+        message='Обновление подготовлено. Приложение будет закрыто и перезапущено автоматически.',
+    )
+
+
+def _deferred_script() -> str:
+    """PowerShell helper: не загружает exe из каталога до его замены."""
+    return r'''param(
+    [int]$ProcessId,
+    [string]$InstallDir,
+    [string]$StagedDir,
+    [string]$BackupDir,
+    [string]$ExeName,
+    [string]$CleanupDir
+)
+$ErrorActionPreference = "Stop"
+$handoff = $false
+try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        $quote = {
+            param($value)
+            '"' + ($value -replace '"', '\"') + '"'
+        }
+        $arguments = @(
+            "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", (& $quote $PSCommandPath),
+            "-ProcessId", $ProcessId.ToString(),
+            "-InstallDir", (& $quote $InstallDir),
+            "-StagedDir", (& $quote $StagedDir),
+            "-BackupDir", (& $quote $BackupDir),
+            "-ExeName", (& $quote $ExeName),
+            "-CleanupDir", (& $quote $CleanupDir)
+        )
+        Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $arguments
+        $handoff = $true
+        exit 0
+    }
+
+    while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+        Start-Sleep -Milliseconds 250
+    }
+
+    if (Test-Path $BackupDir) {
+        Remove-Item -LiteralPath $BackupDir -Recurse -Force
+    }
+    Move-Item -LiteralPath $InstallDir -Destination $BackupDir
+    Move-Item -LiteralPath $StagedDir -Destination $InstallDir
+
+    $newExe = Join-Path $InstallDir $ExeName
+    & $newExe --selftest
+    if ($LASTEXITCODE -ne 0) {
+        throw "Самопроверка новой версии завершилась с кодом $LASTEXITCODE"
+    }
+
+    Remove-Item -LiteralPath $BackupDir -Recurse -Force
+    Start-Process -FilePath $newExe
+}
+catch {
+    if (Test-Path $InstallDir) {
+        Remove-Item -LiteralPath $InstallDir -Recurse -Force
+    }
+    if (Test-Path $BackupDir) {
+        Move-Item -LiteralPath $BackupDir -Destination $InstallDir
+    }
+}
+finally {
+    if (-not $handoff -and (Test-Path $CleanupDir)) {
+        Remove-Item -LiteralPath $CleanupDir -Recurse -Force
+    }
+}
+'''
 
 
 def _extract(archive: Path, dest: Path) -> Path:

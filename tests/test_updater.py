@@ -267,6 +267,26 @@ class InstallTests(unittest.TestCase):
         with self.assertRaises(updater.UpdateError):
             updater.install(archive, install_dir=None, run_selftest=lambda exe: None)
 
+    @patch('gui.services.updater._schedule_deferred_install')
+    def test_frozen_windows_install_is_deferred_until_gui_exits(self, schedule):
+        archive = self._make_archive()
+        schedule.return_value = updater.InstallResult(
+            installed=True,
+            restart_required=True,
+            deferred=True,
+            message='отложено',
+        )
+
+        with patch('gui.services.updater.app_dir', return_value=self.install_dir), \
+             patch.object(updater.sys, 'platform', 'win32'), \
+             patch.object(updater.sys, 'frozen', True, create=True), \
+             patch.object(updater.os, 'getpid', return_value=123):
+            result = updater.install(archive, self.install_dir)
+
+        self.assertTrue(result.deferred)
+        schedule.assert_called_once()
+        self.assertEqual(schedule.call_args.args[2], 123)
+
     def test_extract_rejects_path_traversal(self):
         archive = self.root / 'unsafe.zip'
         with zipfile.ZipFile(archive, 'w') as zf:
